@@ -12,7 +12,7 @@ import {
 export async function postRun(req: Request, res: Response, next: NextFunction) {
   try {
     const input = createRunSchema.parse(req.body);
-    const run = await createPipelineRun(input.niche);
+    const run = await createPipelineRun(input.niche, input.durationSec);
     res.status(201).json(run);
   } catch (err) {
     next(err);

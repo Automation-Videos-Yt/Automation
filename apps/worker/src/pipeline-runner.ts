@@ -238,7 +238,7 @@ export async function runPipeline(runId: string): Promise<void> {
       const scriptInput = {
         topic_title: topic.title,
         topic_angle: topic.angle,
-        target_duration_sec: 75,
+        target_duration_sec: run.targetDurationSec,
       };
       script = await withAgentLog(runId, "script", scriptInput, () =>
         runAgent<typeof scriptInput, ScriptOutput>("script", scriptInput, { runId })
@@ -455,10 +455,13 @@ export async function runPipeline(runId: string): Promise<void> {
       log.info("stage=TIMESTAMP skipped (cached)");
     } else {
       log.info("stage=TIMESTAMP start");
+      // Keep a usable number of scenes on short videos — forcing 7.5s chunks on
+      // a 15s video would give only 2 scenes which feels static.
+      const targetSceneSec = run.targetDurationSec < 30 ? 4 : 7.5;
       const tsInput = {
         audio_path: voice.audio_path,
         script_text: narration,
-        target_scene_sec: 7.5,
+        target_scene_sec: targetSceneSec,
       };
       ts = await withAgentLog(runId, "timestamp", tsInput, () =>
         runAgent<typeof tsInput, TimestampOutput>("timestamp", tsInput, { runId })

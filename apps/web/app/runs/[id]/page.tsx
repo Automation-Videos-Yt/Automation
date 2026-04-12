@@ -136,6 +136,9 @@ export default function RunDetailPage() {
       <div>
         <div className="text-white/50 text-sm">Run · {run.id}</div>
         <h1 className="text-2xl font-semibold mt-1">{run.niche}</h1>
+        <div className="text-xs text-white/50 mt-1">
+          target duration: {run.targetDurationSec}s
+        </div>
       </div>
 
       <StageTimeline run={run} />

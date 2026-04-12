@@ -4,11 +4,16 @@ import { scoped } from "../lib/logger";
 
 const log = scoped("pipeline-svc");
 
-export async function createPipelineRun(niche: string) {
+export async function createPipelineRun(niche: string, durationSec = 75) {
   const run = await prisma.pipelineRun.create({
-    data: { niche, stage: "QUEUED", status: "QUEUED" },
+    data: {
+      niche,
+      targetDurationSec: durationSec,
+      stage: "QUEUED",
+      status: "QUEUED",
+    },
   });
-  log.info({ runId: run.id, niche }, "run created");
+  log.info({ runId: run.id, niche, durationSec }, "run created");
 
   await videoQueue.add(
     "run-pipeline",

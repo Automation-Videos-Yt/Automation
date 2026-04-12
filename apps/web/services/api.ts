@@ -110,6 +110,7 @@ export type Scene = {
 export type PipelineRun = {
   id: string;
   niche: string;
+  targetDurationSec: number;
   stage: PipelineStage;
   status: RunStatus;
   currentAgent: string | null;
@@ -167,11 +168,11 @@ async function handle<T>(res: Response): Promise<T> {
 export const api = {
   base: API_URL,
 
-  createRun(niche: string) {
+  createRun(niche: string, durationSec: number = 75) {
     return fetch(`${API_URL}/pipeline/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ niche }),
+      body: JSON.stringify({ niche, durationSec }),
     }).then<PipelineRun>(handle);
   },
 
