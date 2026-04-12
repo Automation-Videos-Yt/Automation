@@ -85,6 +85,66 @@ export type RunAnalyticsResponse = {
   feedback: FeedbackInsight | null;
 };
 
+// --- Channel-level analytics types ---
+export type ChannelOverview = {
+  channelId: string | null;
+  channelTitle: string | null;
+  subscriberCount: number;
+  totalViews: number;
+  totalVideos: number;
+  hiddenSubscriberCount: boolean;
+  channelThumbnail: string | null;
+  customUrl: string | null;
+  publishedAt: string | null;
+};
+
+export type DailyMetrics = {
+  date: string;
+  views: number;
+  estimatedMinutesWatched: number;
+  averageViewDuration: number;
+  averageViewPercentage: number | null;
+  subscribersGained: number;
+  subscribersLost: number;
+  likes: number;
+  comments: number;
+  shares: number;
+};
+
+export type ChannelAnalyticsSummary = {
+  views: number;
+  estimatedMinutesWatched: number;
+  averageViewDuration: number;
+  subscribersGained: number;
+  subscribersLost: number;
+  netSubscribers: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  impressions: number | null;
+  impressionsCtr: number | null;
+};
+
+export type TopVideo = {
+  videoId: string;
+  title: string | null;
+  thumbnailUrl: string | null;
+  views: number;
+  estimatedMinutesWatched: number;
+  averageViewDuration: number;
+  likes: number;
+  comments: number;
+  subscribersGained: number;
+};
+
+export type ChannelAnalyticsResponse = {
+  overview: ChannelOverview;
+  summary: ChannelAnalyticsSummary;
+  daily: DailyMetrics[];
+  topVideos: TopVideo[];
+  dateRange: { start: string; end: string };
+};
+
 export type HookVariant = {
   id: string;
   index: number;
@@ -242,5 +302,12 @@ export const api = {
     return fetch(`${API_URL}/analytics/sync`, { method: "POST" }).then<{
       queued: number;
     }>(handle);
+  },
+
+  // --- Channel analytics dashboard ---
+  getChannelAnalytics(days: "7" | "28" | "90" | "365" = "28") {
+    return fetch(`${API_URL}/analytics/channel?days=${days}`, {
+      cache: "no-store",
+    }).then<ChannelAnalyticsResponse>(handle);
   },
 };

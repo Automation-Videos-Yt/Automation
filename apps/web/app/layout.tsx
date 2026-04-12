@@ -22,6 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/runs" className="text-white/70 hover:text-white">
                 Runs
               </Link>
+              <Link href="/analytics" className="text-white/70 hover:text-white">
+                Analytics
+              </Link>
               <div className="ml-auto">
                 <YouTubeBadge />
               </div>
