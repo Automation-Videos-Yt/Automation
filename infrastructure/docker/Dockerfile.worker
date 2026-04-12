@@ -1,0 +1,23 @@
+FROM node:20-alpine
+
+# ffmpeg + a font that DejaVu Sans resolves to (fontconfig is required for the subtitles filter).
+RUN apk add --no-cache ffmpeg ttf-dejavu fontconfig openssl && fc-cache -f
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY apps/web/package.json apps/web/package.json
+
+RUN npm install --workspaces --include-workspace-root
+
+# Source: worker code + api's prisma schema (shared client).
+COPY apps/worker apps/worker
+COPY apps/api/prisma apps/api/prisma
+
+WORKDIR /app/apps/worker
+
+RUN npx prisma generate --schema=../api/prisma/schema.prisma
+
+CMD ["npx", "tsx", "src/index.ts"]

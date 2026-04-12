@@ -1,0 +1,25 @@
+FROM node:20-alpine
+
+# Prisma needs the openssl binary for engine detection on Alpine 3.19+.
+RUN apk add --no-cache openssl
+
+WORKDIR /app
+
+# Workspace manifests first for cache efficiency
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY apps/web/package.json apps/web/package.json
+
+RUN npm install --workspaces --include-workspace-root
+
+# Source
+COPY apps/api apps/api
+
+WORKDIR /app/apps/api
+
+RUN npx prisma generate
+
+EXPOSE 4000
+
+CMD ["npx", "tsx", "src/index.ts"]
