@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel previous in-flight runs of the same branch — saves runner minutes on
+# rapid force-pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Node side: install once, then typecheck api + worker, lint + build web
+  # ──────────────────────────────────────────────────────────────────────────
+  node:
+    name: Node (typecheck · lint · web build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Both api and worker import `@prisma/client` — generated code must exist
+      # before tsc can see the types. Worker's script references api's schema,
+      # so generating from the api workspace populates both.
+      - name: Prisma generate
+        run: npm --workspace apps/api run prisma:generate
+
+      - name: Typecheck api
+        run: npx --workspace apps/api tsc -p tsconfig.json --noEmit
+
+      - name: Typecheck worker
+        run: npx --workspace apps/worker tsc -p tsconfig.json --noEmit
+
+      - name: Lint web (next lint)
+        run: npm --workspace apps/web run lint -- --max-warnings=0
+
+      - name: Build web (catches route / component errors)
+        run: npm --workspace apps/web run build
+        env:
+          # Next.js refuses to build without these; dummy values are fine — no
+          # real network calls happen at build time.
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Prisma schema sanity
+  # ──────────────────────────────────────────────────────────────────────────
+  prisma-schema:
+    name: Prisma schema (validate · format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install api workspace
+        run: npm ci --no-audit --no-fund --workspace apps/api
+
+      - name: Validate schema
+        run: npx --workspace apps/api prisma validate
+
+      - name: Format check (fails if schema.prisma needs reformatting)
+        run: npx --workspace apps/api prisma format --check
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Python side: ruff (critical-set lint) + pydantic schema sanity via compile
+  # ──────────────────────────────────────────────────────────────────────────
+  python:
+    name: Python (ruff · compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install ruff
+        run: pip install ruff==0.7.4
+
+      # Critical-set: syntax errors + undefined names + broken f-strings.
+      # Ratchet up (remove --select) once the codebase is clean on style rules.
+      - name: Ruff (critical)
+        run: ruff check --select=E9,F63,F7,F82 ai-system
+
+      - name: Compile-check every .py file
+        run: python -m compileall -q ai-system
+
+      - name: Install runtime deps (for schema import sanity)
+        run: pip install -r ai-system/requirements.txt
+
+      # Importing schemas proves Pydantic models parse. Cheap smoke test.
+      - name: Import Pydantic schemas
+        working-directory: ai-system
+        run: python -c "import schemas; print(schemas.__all__)"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Docker build matrix — verifies every image builds on a clean runner.
+  # Uses GHA cache so repeated runs are fast.
+  # ──────────────────────────────────────────────────────────────────────────
+  docker:
+    name: Docker build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [node, python, prisma-schema]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: infrastructure/docker/Dockerfile.api
+          - service: worker
+            dockerfile: infrastructure/docker/Dockerfile.worker
+          - service: web
+            dockerfile: infrastructure/docker/Dockerfile.web
+          - service: ai
+            dockerfile: infrastructure/docker/Dockerfile.ai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          tags: ai-ytauto-${{ matrix.service }}:ci
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Aggregated status check — the only required check to mark in branch rules.
+  # ──────────────────────────────────────────────────────────────────────────
+  ci-passed:
+    name: CI passed
+    runs-on: ubuntu-latest
+    needs: [node, prisma-schema, python, docker]
+    if: always()
+    steps:
+      - name: Fail if any dependency failed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more upstream jobs failed."
+            exit 1
+          fi
+          echo "All checks passed."
