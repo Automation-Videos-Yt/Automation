@@ -217,10 +217,29 @@ export type AgentLog = {
   createdAt: string;
 };
 
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public body: string,
+    public code?: string
+  ) {
+    super(`API ${status}: ${body}`);
+    this.name = "ApiError";
+  }
+}
+
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+    // Surface the structured error.code when the server sent JSON.
+    let code: string | undefined;
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed?.error === "string") code = parsed.error;
+    } catch {
+      // non-JSON body — leave code undefined
+    }
+    throw new ApiError(res.status, text, code);
   }
   return res.json() as Promise<T>;
 }

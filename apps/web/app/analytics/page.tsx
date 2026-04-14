@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   api,
+  ApiError,
   ChannelAnalyticsResponse,
   DailyMetrics,
   TopVideo,
@@ -265,7 +266,13 @@ export default function ChannelAnalyticsPage() {
     queryKey: ["channel-analytics", range],
     queryFn: () => api.getChannelAnalytics(range),
     staleTime: 60_000,
-    retry: 1,
+    // Don't retry 4xx — they won't succeed. Retry once on 5xx / network failures.
+    retry: (failureCount, err) => {
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        return false;
+      }
+      return failureCount < 1;
+    },
   });
 
   return (
@@ -347,7 +354,7 @@ export default function ChannelAnalyticsPage() {
             Failed to load analytics
           </div>
           <div className="text-sm text-red-300/70 mt-1">
-            {(error as any)?.message ?? "Unknown error"}
+            {error instanceof Error ? error.message : "Unknown error"}
           </div>
           <div className="text-xs text-white/50 mt-3">
             Make sure your YouTube account is connected and has the analytics

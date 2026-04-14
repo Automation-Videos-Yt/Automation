@@ -1,70 +1,21 @@
 import { google } from "googleapis";
-import { prisma } from "../db/prisma";
-import { env } from "../config/env";
+import {
+  authedClient,
+  parseAnalyticsCell as parseCell,
+} from "../integrations/youtube/oauth";
 import { scoped } from "../lib/logger";
 
 const log = scoped("channel-analytics");
-
-// ── OAuth helper (reusable, same pattern as worker) ──────────────────────────
-
-function oauth2() {
-  if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET) {
-    throw new Error("YouTube OAuth not configured");
-  }
-  return new google.auth.OAuth2(
-    env.YOUTUBE_CLIENT_ID,
-    env.YOUTUBE_CLIENT_SECRET,
-    env.YOUTUBE_REDIRECT_URI
-  );
-}
-
-async function authedClient() {
-  const acct = await prisma.youTubeAccount.findUnique({
-    where: { id: "default" },
-  });
-  if (!acct) throw new Error("no connected YouTube account");
-
-  const client = oauth2();
-  client.setCredentials({
-    access_token: acct.accessToken,
-    refresh_token: acct.refreshToken,
-    expiry_date: acct.tokenExpiresAt.getTime(),
-    scope: acct.scope,
-  });
-
-  // Persist rotated tokens automatically
-  client.on("tokens", async (tokens) => {
-    try {
-      await prisma.youTubeAccount.update({
-        where: { id: "default" },
-        data: {
-          accessToken: tokens.access_token ?? acct.accessToken,
-          ...(tokens.refresh_token
-            ? { refreshToken: tokens.refresh_token }
-            : {}),
-          tokenExpiresAt: tokens.expiry_date
-            ? new Date(tokens.expiry_date)
-            : acct.tokenExpiresAt,
-        },
-      });
-    } catch (err) {
-      log.error({ err }, "failed to persist rotated tokens");
-    }
-  });
-
-  return { client, acct };
-}
 
 function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function parseCell(row: (string | number)[], idx: number): number | null {
-  if (idx < 0 || idx >= row.length) return null;
-  const v = row[idx];
-  if (v == null) return null;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
+// YouTube Analytics v2 returns impressionsCtr as a decimal (0–1). Everywhere
+// in this codebase we want it in percent form (0–100) so display + admission
+// thresholds + performance math all agree. Normalize at ingestion.
+function toPct(ctrDecimal: number | null): number | null {
+  return ctrDecimal == null ? null : ctrDecimal * 100;
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -131,7 +82,7 @@ export type ChannelAnalyticsResponse = {
 // ── Channel overview via Data API v3 ─────────────────────────────────────────
 
 async function fetchChannelOverview(
-  auth: ReturnType<typeof oauth2>
+  auth: InstanceType<typeof google.auth.OAuth2>
 ): Promise<ChannelOverview> {
   const youtube = google.youtube({ version: "v3", auth });
   const res = await youtube.channels.list({
@@ -161,7 +112,7 @@ async function fetchChannelOverview(
 // ── Daily analytics via YouTube Analytics API v2 ─────────────────────────────
 
 async function fetchDailyAnalytics(
-  auth: ReturnType<typeof oauth2>,
+  auth: InstanceType<typeof google.auth.OAuth2>,
   startDate: string,
   endDate: string
 ): Promise<{ summary: ChannelAnalyticsSummary; daily: DailyMetrics[] }> {
@@ -254,7 +205,9 @@ async function fetchDailyAnalytics(
     );
     const impRow = (impRes.data.rows ?? [])[0] ?? [];
     impressions = parseCell(impRow, impHeaders.indexOf("impressions"));
-    impressionsCtr = parseCell(impRow, impHeaders.indexOf("impressionsCtr"));
+    impressionsCtr = toPct(
+      parseCell(impRow, impHeaders.indexOf("impressionsCtr"))
+    );
   } catch (err) {
     log.warn({ err }, "impressions query failed — continuing");
   }
@@ -274,7 +227,7 @@ async function fetchDailyAnalytics(
 // ── Top videos via YouTube Analytics API v2 ──────────────────────────────────
 
 async function fetchTopVideos(
-  auth: ReturnType<typeof oauth2>,
+  auth: InstanceType<typeof google.auth.OAuth2>,
   startDate: string,
   endDate: string,
   limit = 10

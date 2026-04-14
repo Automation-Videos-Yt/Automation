@@ -1,19 +1,9 @@
 import { google } from "googleapis";
-import { env } from "../../config/env";
 import { prisma } from "../../db/prisma";
+import { env } from "../../config/env";
 import { scoped } from "../../lib/logger";
 
 const log = scoped("yt-oauth-lib");
-
-// Scope notes:
-// - youtube.upload: videos.insert + thumbnails.set for videos the app uploaded
-// - youtube.readonly: channel info (handle, title) for the status endpoint
-// - yt-analytics.readonly: YouTube Analytics reports.query (Phase 4 feedback loop)
-export const YT_SCOPES = [
-  "https://www.googleapis.com/auth/youtube.upload",
-  "https://www.googleapis.com/auth/youtube.readonly",
-  "https://www.googleapis.com/auth/yt-analytics.readonly",
-];
 
 export class NotConnectedError extends Error {
   code = "NOT_CONNECTED" as const;
@@ -22,7 +12,7 @@ export class NotConnectedError extends Error {
   }
 }
 
-export function oauthClient() {
+function oauth2() {
   if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET) {
     throw new Error(
       "YouTube OAuth not configured: set YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET"
@@ -35,31 +25,17 @@ export function oauthClient() {
   );
 }
 
-export function buildAuthUrl(state: string): string {
-  const client = oauthClient();
-  return client.generateAuthUrl({
-    access_type: "offline",
-    prompt: "consent", // force refresh_token on repeat connects
-    scope: YT_SCOPES,
-    include_granted_scopes: true,
-    state,
-  });
-}
-
 /**
  * Load the stored singleton YouTubeAccount, build an OAuth2 client with its
- * tokens, and register a handler that persists rotated tokens back to Postgres
- * so subsequent calls pick up the new access_token.
- *
- * Throws NotConnectedError if no account is stored — callers can surface 409.
+ * tokens, and register a handler that persists rotated tokens back to Postgres.
  */
-export async function authedClient() {
+export async function authedYouTubeClient() {
   const acct = await prisma.youTubeAccount.findUnique({
     where: { id: "default" },
   });
   if (!acct) throw new NotConnectedError();
 
-  const client = oauthClient();
+  const client = oauth2();
   client.setCredentials({
     access_token: acct.accessToken,
     refresh_token: acct.refreshToken,
@@ -91,8 +67,7 @@ export async function authedClient() {
 }
 
 /**
- * Pluck a numeric cell from an Analytics reports.query row, tolerating
- * missing columns, string-encoded numbers, and non-finite values.
+ * Pluck a numeric cell from an Analytics reports.query row.
  */
 export function parseAnalyticsCell(
   row: (string | number)[],

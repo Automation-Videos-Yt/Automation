@@ -1,54 +1,11 @@
 import { google } from "googleapis";
-import { prisma } from "../db/prisma";
-import { env } from "../config/env";
+import {
+  authedYouTubeClient,
+  parseAnalyticsCell as parseCell,
+} from "../integrations/youtube/client";
 import { scoped } from "../lib/logger";
 
 const log = scoped("yt-analytics");
-
-function oauth2() {
-  if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET) {
-    throw new Error("YouTube OAuth not configured");
-  }
-  return new google.auth.OAuth2(
-    env.YOUTUBE_CLIENT_ID,
-    env.YOUTUBE_CLIENT_SECRET,
-    env.YOUTUBE_REDIRECT_URI
-  );
-}
-
-async function authedClient() {
-  const acct = await prisma.youTubeAccount.findUnique({
-    where: { id: "default" },
-  });
-  if (!acct) throw new Error("no connected YouTube account");
-
-  const client = oauth2();
-  client.setCredentials({
-    access_token: acct.accessToken,
-    refresh_token: acct.refreshToken,
-    expiry_date: acct.tokenExpiresAt.getTime(),
-    scope: acct.scope,
-  });
-
-  client.on("tokens", async (tokens) => {
-    try {
-      await prisma.youTubeAccount.update({
-        where: { id: "default" },
-        data: {
-          accessToken: tokens.access_token ?? acct.accessToken,
-          ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
-          tokenExpiresAt: tokens.expiry_date
-            ? new Date(tokens.expiry_date)
-            : acct.tokenExpiresAt,
-        },
-      });
-    } catch (err) {
-      log.error({ err }, "failed to persist rotated tokens");
-    }
-  });
-
-  return client;
-}
 
 export type AnalyticsSnapshot = {
   views: number;
@@ -56,6 +13,7 @@ export type AnalyticsSnapshot = {
   comments: number;
   shares: number | null;
   impressions: number | null;
+  /** CTR in percent form (0–100), normalized from the API's 0–1 decimal. */
   ctr: number | null;
   avgViewDurationSec: number | null;
   avgViewPercentage: number | null;
@@ -67,14 +25,6 @@ function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function parseCell(row: (string | number)[], idx: number): number | null {
-  if (idx < 0 || idx >= row.length) return null;
-  const v = row[idx];
-  if (v == null) return null;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 /**
  * Pull a single-video analytics snapshot from the YouTube Analytics API.
  * Covers lifetime-to-date — we query from upload date to today.
@@ -83,7 +33,7 @@ export async function fetchVideoAnalytics(
   youtubeVideoId: string,
   uploadedAt: Date
 ): Promise<AnalyticsSnapshot> {
-  const auth = await authedClient();
+  const { client: auth } = await authedYouTubeClient();
   const analytics = google.youtubeAnalytics({ version: "v2", auth });
 
   const startDate = fmtDate(uploadedAt);
@@ -133,7 +83,10 @@ export async function fetchVideoAnalytics(
     const impHeaders = (impRes.data.columnHeaders ?? []).map((h) => h.name ?? "");
     const impRow = (impRes.data.rows ?? [])[0] ?? [];
     impressions = parseCell(impRow, impHeaders.indexOf("impressions"));
-    ctr = parseCell(impRow, impHeaders.indexOf("impressionsCtr"));
+    // YouTube returns CTR as a 0–1 decimal; normalize to percent so admission
+    // thresholds + feedback prompts + display all speak the same units.
+    const ctrDecimal = parseCell(impRow, impHeaders.indexOf("impressionsCtr"));
+    ctr = ctrDecimal == null ? null : ctrDecimal * 100;
   } catch (err) {
     // Impression metrics aren't always available (content-owner reports only, some regions lag).
     log.warn({ err, videoId: youtubeVideoId }, "impressions query failed — continuing without");

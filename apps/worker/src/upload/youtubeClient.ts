@@ -1,57 +1,12 @@
 import { createReadStream } from "node:fs";
 import { google } from "googleapis";
-import { prisma } from "../db/prisma";
-import { env } from "../config/env";
+import { authedYouTubeClient } from "../integrations/youtube/client";
 import { scoped } from "../lib/logger";
 
 const log = scoped("yt-client");
 
-function oauth2() {
-  if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET) {
-    throw new Error("YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET not configured");
-  }
-  return new google.auth.OAuth2(
-    env.YOUTUBE_CLIENT_ID,
-    env.YOUTUBE_CLIENT_SECRET,
-    env.YOUTUBE_REDIRECT_URI
-  );
-}
-
 async function loadAuthedClient() {
-  const acct = await prisma.youTubeAccount.findUnique({
-    where: { id: "default" },
-  });
-  if (!acct) throw new Error("no connected YouTube account");
-
-  const client = oauth2();
-  client.setCredentials({
-    access_token: acct.accessToken,
-    refresh_token: acct.refreshToken,
-    expiry_date: acct.tokenExpiresAt.getTime(),
-    scope: acct.scope,
-  });
-
-  // Persist rotated tokens automatically.
-  client.on("tokens", async (tokens) => {
-    try {
-      await prisma.youTubeAccount.update({
-        where: { id: "default" },
-        data: {
-          accessToken: tokens.access_token ?? acct.accessToken,
-          ...(tokens.refresh_token
-            ? { refreshToken: tokens.refresh_token }
-            : {}),
-          tokenExpiresAt: tokens.expiry_date
-            ? new Date(tokens.expiry_date)
-            : acct.tokenExpiresAt,
-        },
-      });
-      log.info("rotated tokens persisted");
-    } catch (err) {
-      log.error({ err }, "failed to persist rotated tokens");
-    }
-  });
-
+  const { client } = await authedYouTubeClient();
   return client;
 }
 

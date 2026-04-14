@@ -3,6 +3,7 @@ import {
   getChannelAnalytics,
   DateRangePreset,
 } from "../services/channel-analytics.service";
+import { NotConnectedError } from "../integrations/youtube/oauth";
 import { scoped } from "../lib/logger";
 
 const log = scoped("channel-analytics-ctrl");
@@ -23,10 +24,10 @@ export async function getChannelAnalyticsController(
 
     const data = await getChannelAnalytics(days);
     res.json(data);
-  } catch (err: any) {
-    if (err.message === "no connected YouTube account") {
+  } catch (err) {
+    if (err instanceof NotConnectedError) {
       res.status(409).json({
-        error: "NOT_CONNECTED",
+        error: err.code,
         message: "Connect a YouTube account first",
       });
       return;

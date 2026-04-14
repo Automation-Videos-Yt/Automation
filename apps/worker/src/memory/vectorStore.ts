@@ -36,19 +36,24 @@ function tagFromPerformance(p: number): string {
   return p >= 0.8 ? "strong" : p >= 0.45 ? "mid" : "weak";
 }
 
+// All CTR values flowing through this module are in percent form (0–100) —
+// normalized at ingestion in youtubeAnalytics.ts. If you change the source
+// units, update these constants too.
 function normalizePerformance(
   ctr: number | null,
   avgViewPercentage: number | null
 ): number {
-  const ctrScore = ctr == null ? 0 : Math.min(1, ctr / 0.1);
-  const avpScore = avgViewPercentage == null ? 0 : Math.min(1, avgViewPercentage / 100);
+  // 10% CTR ceilings out the ctr component; 100% avp ceilings out the avp one.
+  const ctrScore = ctr == null ? 0 : Math.min(1, ctr / 10);
+  const avpScore =
+    avgViewPercentage == null ? 0 : Math.min(1, avgViewPercentage / 100);
   return 0.6 * ctrScore + 0.4 * avpScore;
 }
 
 // Low bar: keeps obvious failures out of memory but lets marginal runs through
 // so the feedback signal survives sparse data.
 const ADMISSION_VIEWS_MIN = 10;
-const ADMISSION_CTR_MIN = 0.02;
+const ADMISSION_CTR_MIN = 2.0; // 2% CTR (percent form — see note above)
 const SIMILARITY_FLOOR = 0.15;
 
 // =====================================================
