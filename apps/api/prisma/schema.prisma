@@ -59,17 +59,17 @@ model PipelineRun {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  topic         Topic?
-  script        Script?
-  hookVariants  HookVariant[]
-  voiceAsset    VoiceAsset?
-  scenes        Scene[]
-  video         Video?
-  logs          AgentLog[]
-  upload        YouTubeUpload?
-  analytics     VideoAnalytics[]
-  feedback      FeedbackInsight?
-  prediction    PerformancePrediction?
+  topic        Topic?
+  script       Script?
+  hookVariants HookVariant[]
+  voiceAsset   VoiceAsset?
+  scenes       Scene[]
+  video        Video?
+  logs         AgentLog[]
+  upload       YouTubeUpload?
+  analytics    VideoAnalytics[]
+  feedback     FeedbackInsight?
+  prediction   PerformancePrediction?
 
   @@index([status, stage])
   @@index([createdAt])
@@ -89,27 +89,27 @@ model Topic {
 }
 
 model Script {
-  id                   String      @id @default(cuid())
-  runId                String      @unique
-  run                  PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  hook                 String
-  body                 String      @db.Text
-  cta                  String
-  wordCount            Int
-  durationEstimateSec  Int
-  createdAt            DateTime    @default(now())
+  id                  String      @id @default(cuid())
+  runId               String      @unique
+  run                 PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  hook                String
+  body                String      @db.Text
+  cta                 String
+  wordCount           Int
+  durationEstimateSec Int
+  createdAt           DateTime    @default(now())
 }
 
 model HookVariant {
-  id         String      @id @default(cuid())
-  runId      String
-  run        PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  index      Int
-  text       String
-  score      Float
-  reasoning  String?
-  chosen     Boolean     @default(false)
-  createdAt  DateTime    @default(now())
+  id        String      @id @default(cuid())
+  runId     String
+  run       PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  index     Int
+  text      String
+  score     Float
+  reasoning String?
+  chosen    Boolean     @default(false)
+  createdAt DateTime    @default(now())
 
   @@index([runId, index])
 }
@@ -125,76 +125,76 @@ model VoiceAsset {
 }
 
 model Scene {
-  id             String      @id @default(cuid())
-  runId          String
-  run            PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  index          Int
-  startSec       Float
-  endSec         Float
-  text           String      @db.Text
-  query          String?
-  clipUrl        String?
-  clipSource     String?
-  clipPath       String?
+  id              String      @id @default(cuid())
+  runId           String
+  run             PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  index           Int
+  startSec        Float
+  endSec          Float
+  text            String      @db.Text
+  query           String?
+  clipUrl         String?
+  clipSource      String?
+  clipPath        String?
   clipDurationSec Float?
-  createdAt      DateTime    @default(now())
+  createdAt       DateTime    @default(now())
 
   @@unique([runId, index])
 }
 
 model Video {
-  id             String      @id @default(cuid())
-  runId          String      @unique
-  run            PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  videoPath      String
-  thumbnailPath  String?
-  title          String?
-  description    String?     @db.Text
-  tags           String[]
-  createdAt      DateTime    @default(now())
+  id            String      @id @default(cuid())
+  runId         String      @unique
+  run           PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  videoPath     String
+  thumbnailPath String?
+  title         String?
+  description   String?     @db.Text
+  tags          String[]
+  createdAt     DateTime    @default(now())
 }
 
 model AgentLog {
-  id            String         @id @default(cuid())
-  runId         String
-  run           PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  agent         String
-  inputJson     Json
-  outputJson    Json?
-  durationMs    Int
-  status        AgentLogStatus
-  errorMessage  String?
-  createdAt     DateTime       @default(now())
+  id           String         @id @default(cuid())
+  runId        String
+  run          PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  agent        String
+  inputJson    Json
+  outputJson   Json?
+  durationMs   Int
+  status       AgentLogStatus
+  errorMessage String?
+  createdAt    DateTime       @default(now())
 
   @@index([runId, createdAt])
 }
 
 // Singleton row (id = "default") that stores the refresh token for the linked YouTube channel.
 model YouTubeAccount {
-  id              String   @id @default("default")
-  channelId       String?
-  channelTitle    String?
-  accessToken     String   @db.Text
-  refreshToken    String   @db.Text
-  scope           String
-  tokenExpiresAt  DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default("default")
+  channelId      String?
+  channelTitle   String?
+  accessToken    String   @db.Text
+  refreshToken   String   @db.Text
+  scope          String
+  tokenExpiresAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model YouTubeUpload {
-  id               String         @id @default(cuid())
-  runId            String         @unique
-  run              PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  status           UploadStatus   @default(PENDING)
-  privacy          UploadPrivacy  @default(PRIVATE)
-  youtubeVideoId   String?
-  videoUrl         String?
-  errorMessage     String?
-  startedAt        DateTime?
-  completedAt      DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id             String        @id @default(cuid())
+  runId          String        @unique
+  run            PipelineRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  status         UploadStatus  @default(PENDING)
+  privacy        UploadPrivacy @default(PRIVATE)
+  youtubeVideoId String?
+  videoUrl       String?
+  errorMessage   String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([status, createdAt])
 }
@@ -244,33 +244,33 @@ model FeedbackInsight {
 }
 
 model TopicMemory {
-  id           String   @id @default(cuid())
-  runId        String?  @unique // nullable so we can seed manually too
-  niche        String
-  topicTitle   String
-  topicAngle   String
-  ctr          Float?
-  views        Int?
-  avgViewPct   Float?
-  performance  Float // normalized score used to break ties / rank
-  embedding    Float[] // text-embedding-3-small, 1536 dims
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  runId       String?  @unique // nullable so we can seed manually too
+  niche       String
+  topicTitle  String
+  topicAngle  String
+  ctr         Float?
+  views       Int?
+  avgViewPct  Float?
+  performance Float // normalized score used to break ties / rank
+  embedding   Float[] // text-embedding-3-small, 1536 dims
+  createdAt   DateTime @default(now())
 
   @@index([niche])
 }
 
 model HookMemory {
-  id           String   @id @default(cuid())
-  runId        String?  @unique
-  niche        String
-  topicTitle   String
-  hookText     String   @db.Text
-  ctr          Float?
-  views        Int?
-  avgViewPct   Float?
-  performance  Float
-  embedding    Float[]
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  runId       String?  @unique
+  niche       String
+  topicTitle  String
+  hookText    String   @db.Text
+  ctr         Float?
+  views       Int?
+  avgViewPct  Float?
+  performance Float
+  embedding   Float[]
+  createdAt   DateTime @default(now())
 
   @@index([niche])
 }
