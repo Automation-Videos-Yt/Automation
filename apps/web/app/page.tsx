@@ -17,13 +17,23 @@ export default function HomePage() {
   const [niche, setNiche] = useState("");
   const [durationSec, setDurationSec] = useState<number>(75);
   const [custom, setCustom] = useState(false);
+  const [count, setCount] = useState<number>(1);
   const router = useRouter();
 
-  const m = useMutation({
+  const single = useMutation({
     mutationFn: (v: { niche: string; durationSec: number }) =>
       api.createRun(v.niche, v.durationSec),
     onSuccess: (run) => router.push(`/runs/${run.id}`),
   });
+
+  const batch = useMutation({
+    mutationFn: (v: { niche: string; durationSec: number; count: number }) =>
+      api.createBatch(v.niche, v.count, v.durationSec),
+    onSuccess: () => router.push("/runs"),
+  });
+
+  const pending = single.isPending || batch.isPending;
+  const err = single.error ?? batch.error;
 
   return (
     <div className="space-y-6">
@@ -38,8 +48,12 @@ export default function HomePage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (niche.trim().length >= 3) {
-            m.mutate({ niche: niche.trim(), durationSec });
+          const trimmed = niche.trim();
+          if (trimmed.length < 3) return;
+          if (count > 1) {
+            batch.mutate({ niche: trimmed, durationSec, count });
+          } else {
+            single.mutate({ niche: trimmed, durationSec });
           }
         }}
         className="space-y-4 max-w-xl"
@@ -56,10 +70,16 @@ export default function HomePage() {
           />
           <button
             type="submit"
-            disabled={m.isPending}
+            disabled={pending}
             className="rounded-md bg-white text-black px-4 py-2 font-medium disabled:opacity-50"
           >
-            {m.isPending ? "Starting..." : "Start run"}
+            {pending
+              ? count > 1
+                ? `Queueing ${count}…`
+                : "Starting..."
+              : count > 1
+              ? `Start ${count} runs`
+              : "Start run"}
           </button>
         </div>
 
@@ -118,11 +138,36 @@ export default function HomePage() {
             10–180s · short durations auto-use 4s scene chunks instead of 7.5s
           </div>
         </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-white/50">
+            Batch size
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {[1, 3, 5, 10].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setCount(n)}
+                className={`text-sm rounded-md border px-3 py-1.5 ${
+                  count === n
+                    ? "bg-white text-black border-white"
+                    : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                }`}
+              >
+                {n === 1 ? "Single" : `×${n}`}
+              </button>
+            ))}
+            <span className="text-xs text-white/50">
+              duplicate-topic guard prevents the batch from landing on the same idea
+            </span>
+          </div>
+        </div>
       </form>
 
-      {m.error && (
+      {err && (
         <div className="text-red-400 text-sm">
-          {(m.error as Error).message}
+          {(err as Error).message}
         </div>
       )}
     </div>

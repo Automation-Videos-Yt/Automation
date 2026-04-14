@@ -57,6 +57,95 @@ const ADMISSION_CTR_MIN = 2.0; // 2% CTR (percent form — see note above)
 const SIMILARITY_FLOOR = 0.15;
 
 // =====================================================
+// Duplicate-topic guard (separate from the memory store)
+// =====================================================
+
+// Cosine-similarity threshold for calling a newly generated topic a "duplicate".
+// 0.85 is tight enough that near-identical titles trip but paraphrases of
+// different ideas don't.
+const DUPLICATE_SIM_THRESHOLD = 0.85;
+
+export type DuplicateHit = {
+  runId: string;
+  title: string;
+  angle: string;
+  similarity: number;
+};
+
+/**
+ * Check whether a freshly generated topic matches any past topic closely.
+ * Returns the closest match above the threshold, or null.
+ */
+export async function findDuplicateTopic(
+  title: string,
+  angle: string,
+  excludeRunId: string
+): Promise<DuplicateHit | null> {
+  const past = await prisma.topic.findMany({
+    where: {
+      NOT: { runId: excludeRunId },
+      // Only compare against topics that actually have embeddings persisted
+      // (older runs from before the column existed will skip cleanly).
+      titleEmbedding: { isEmpty: false },
+    },
+    select: {
+      runId: true,
+      title: true,
+      angle: true,
+      titleEmbedding: true,
+    },
+    take: 500,
+    orderBy: { createdAt: "desc" },
+  });
+  if (past.length === 0) return null;
+
+  let queryVec: number[];
+  try {
+    queryVec = await computeEmbedding(`${title}. ${angle}`);
+  } catch (err) {
+    log.warn({ err }, "embedding failed — skipping duplicate check");
+    return null;
+  }
+
+  let best: DuplicateHit | null = null;
+  for (const p of past) {
+    const sim = cosine(queryVec, p.titleEmbedding);
+    if (sim >= DUPLICATE_SIM_THRESHOLD && (!best || sim > best.similarity)) {
+      best = {
+        runId: p.runId,
+        title: p.title,
+        angle: p.angle,
+        similarity: sim,
+      };
+    }
+  }
+  if (best) {
+    log.info(
+      { title, match: best.title, sim: best.similarity.toFixed(3) },
+      "duplicate topic detected"
+    );
+  }
+  return best;
+}
+
+/**
+ * Computes + returns the embedding for a newly persisted Topic so the caller
+ * can store it on the Topic row. Returns [] on failure so the pipeline isn't
+ * blocked — dedup just won't trigger against runs missing embeddings.
+ */
+export async function embedTopicForDedup(
+  title: string,
+  angle: string
+): Promise<number[]> {
+  try {
+    return await computeEmbedding(`${title}. ${angle}`);
+  } catch (err) {
+    log.warn({ err }, "topic embedding failed — storing empty embedding");
+    return [];
+  }
+}
+
+// =====================================================
 // Topic memory
 // =====================================================
 

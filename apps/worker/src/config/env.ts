@@ -20,6 +20,9 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Cron schedule for auto-sync of YouTube analytics. Default: every 6 hours.
+  // Set to "" to disable the scheduler entirely.
+  ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),
 });
 
 const parsed = schema.safeParse(process.env);

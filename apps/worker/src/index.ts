@@ -4,6 +4,7 @@ import { env } from "./config/env";
 import { runPipeline } from "./pipeline-runner";
 import { runUpload } from "./upload/upload-runner";
 import { runEnrichment } from "./enrichment/enrichment-runner";
+import { startAnalyticsSyncCron } from "./cron/analytics-sync";
 import { logger, scoped } from "./lib/logger";
 
 const log = scoped("worker");
@@ -88,6 +89,11 @@ const enrichmentWorker = new Worker<{ runId: string }>(
 );
 
 enrichmentWorker.on("ready", () => log.info("enrichmentQueue ready"));
+
+// ------------------------------------------------------------
+// Scheduled jobs
+// ------------------------------------------------------------
+startAnalyticsSyncCron();
 enrichmentWorker.on("failed", (job, err) =>
   log.error({ jobId: job?.id, err: err.message }, "enrichment job failed event")
 );

@@ -8,6 +8,7 @@ import { UploadCard } from "../../../components/UploadCard";
 import { AnalyticsCard } from "../../../components/AnalyticsCard";
 import { FeedbackCard } from "../../../components/FeedbackCard";
 import { PredictionCard } from "../../../components/PredictionCard";
+import { AssetActions } from "../../../components/AssetActions";
 
 const STAGES: PipelineRun["stage"][] = [
   "TOPIC",
@@ -136,8 +137,16 @@ export default function RunDetailPage() {
       <div>
         <div className="text-white/50 text-sm">Run · {run.id}</div>
         <h1 className="text-2xl font-semibold mt-1">{run.niche}</h1>
-        <div className="text-xs text-white/50 mt-1">
-          target duration: {run.targetDurationSec}s
+        <div className="text-xs text-white/50 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>target duration: {run.targetDurationSec}s</span>
+          {run.cost && run.cost.totalUsd > 0 && (
+            <span title={`voice $${run.cost.voiceUsd.toFixed(4)} · whisper $${run.cost.whisperUsd.toFixed(4)} · thumbnail $${run.cost.thumbnailUsd.toFixed(4)} · llm $${run.cost.llmUsd.toFixed(4)}`}>
+              spend: <span className="tabular-nums text-white/70">${run.cost.totalUsd.toFixed(3)}</span>
+            </span>
+          )}
+          {run.cost?.source.voiceProvider && (
+            <span className="text-white/40">voice: {run.cost.source.voiceProvider}</span>
+          )}
         </div>
       </div>
 
@@ -293,7 +302,10 @@ export default function RunDetailPage() {
       )}
 
       {run.video && run.status === "COMPLETED" && (
-        <UploadCard runId={run.id} initial={run.upload ?? null} />
+        <>
+          <AssetActions run={run} />
+          <UploadCard runId={run.id} initial={run.upload ?? null} />
+        </>
       )}
 
       {run.upload?.status === "COMPLETED" && (

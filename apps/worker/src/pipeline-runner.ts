@@ -7,7 +7,12 @@ import { generateSrtFromWords } from "./media/subtitles";
 import { downloadClip } from "./media/clipDownload";
 import { prepareSceneClip } from "./media/clipPrep";
 import { composeFinalVideo } from "./media/compose";
-import { retrievePastHooks, retrievePastTopics } from "./memory/vectorStore";
+import {
+  embedTopicForDedup,
+  findDuplicateTopic,
+  retrievePastHooks,
+  retrievePastTopics,
+} from "./memory/vectorStore";
 import {
   fileExists,
   loadFinalVideoPath,
@@ -201,13 +206,63 @@ export async function runPipeline(runId: string): Promise<void> {
       log.info("stage=TOPIC skipped (cached)");
     } else {
       log.info("stage=TOPIC start");
-      const topicInput = { niche: run.niche, past_topics: pastTopics };
       if (pastTopics.length > 0) {
-        log.info({ count: pastTopics.length }, "topic stage augmented with past memory");
+        log.info(
+          { count: pastTopics.length },
+          "topic stage augmented with past memory"
+        );
       }
-      topic = await withAgentLog(runId, "topic", topicInput, () =>
-        runAgent<typeof topicInput, TopicOutput>("topic", topicInput, { runId })
-      );
+
+      // Duplicate-topic retry loop: generate a topic, check if it's too close
+      // to an existing one, and if so regenerate with an explicit exclude list.
+      // Cap retries so a pathologically-similar niche still finishes.
+      const MAX_TOPIC_ATTEMPTS = 3;
+      const excludeTitles: string[] = [];
+      let topicEmbedding: number[] = [];
+      let generated: TopicOutput | null = null;
+
+      for (let attempt = 1; attempt <= MAX_TOPIC_ATTEMPTS; attempt++) {
+        const topicInput = {
+          niche: run.niche,
+          past_topics: pastTopics,
+          exclude_titles: excludeTitles,
+        };
+        generated = await withAgentLog(
+          runId,
+          excludeTitles.length > 0 ? `topic.retry${attempt - 1}` : "topic",
+          topicInput,
+          () =>
+            runAgent<typeof topicInput, TopicOutput>("topic", topicInput, {
+              runId,
+            })
+        );
+        topicEmbedding = await embedTopicForDedup(
+          generated.title,
+          generated.angle
+        );
+        const dup = await findDuplicateTopic(
+          generated.title,
+          generated.angle,
+          runId
+        );
+        if (!dup) break;
+        log.warn(
+          {
+            attempt,
+            duplicateOf: dup.title,
+            similarity: dup.similarity.toFixed(3),
+          },
+          "topic too close to a past run — retrying with exclusion"
+        );
+        excludeTitles.push(generated.title, dup.title);
+        if (attempt === MAX_TOPIC_ATTEMPTS) {
+          log.warn(
+            "max topic retries reached — accepting last generated topic"
+          );
+        }
+      }
+      topic = generated!;
+
       await prisma.topic.create({
         data: {
           runId,
@@ -215,10 +270,15 @@ export async function runPipeline(runId: string): Promise<void> {
           angle: topic.angle,
           rationale: topic.rationale,
           trendScore: topic.trend_score,
+          titleEmbedding: topicEmbedding,
         },
       });
       log.info(
-        { title: topic.title, stageMs: Date.now() - stageT0 },
+        {
+          title: topic.title,
+          retriedFrom: excludeTitles.length / 2,
+          stageMs: Date.now() - stageT0,
+        },
         "stage=TOPIC done"
       );
     }

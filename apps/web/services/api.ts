@@ -206,6 +206,22 @@ export type PipelineRun = {
   scenes?: Scene[];
   upload?: YouTubeUpload | null;
   prediction?: PerformancePrediction | null;
+  cost?: RunCost;
+};
+
+export type RunCost = {
+  voiceUsd: number;
+  whisperUsd: number;
+  thumbnailUsd: number;
+  llmUsd: number;
+  totalUsd: number;
+  source: {
+    voiceProvider: string | null;
+    voiceChars: number | null;
+    audioDurationSec: number | null;
+    thumbnailQuality: string | null;
+    thumbnailEnabled: boolean;
+  };
 };
 
 export type AgentLog = {
@@ -253,6 +269,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ niche, durationSec }),
     }).then<PipelineRun>(handle);
+  },
+
+  createBatch(niche: string, count: number, durationSec: number = 75) {
+    return fetch(`${API_URL}/pipeline/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ niche, count, durationSec }),
+    }).then<{ count: number; runs: PipelineRun[] }>(handle);
   },
 
   getRun(id: string) {

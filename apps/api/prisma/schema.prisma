@@ -76,14 +76,16 @@ model PipelineRun {
 }
 
 model Topic {
-  id         String      @id @default(cuid())
-  runId      String      @unique
-  run        PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  title      String
-  angle      String
-  rationale  String
-  trendScore Float       @default(0)
-  createdAt  DateTime    @default(now())
+  id             String      @id @default(cuid())
+  runId          String      @unique
+  run            PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  title          String
+  angle          String
+  rationale      String
+  trendScore     Float       @default(0)
+  // Embedding of "title. angle" used for duplicate-topic detection on future runs.
+  titleEmbedding Float[]
+  createdAt      DateTime    @default(now())
 }
 
 model Script {

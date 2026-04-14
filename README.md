@@ -1,148 +1,285 @@
 # AI YouTube Automation
 
-Autonomous, self-improving, cost-aware content pipeline: niche → published short → analytics fed back → next run knows what worked.
+Autonomous, self-improving, cost-aware content pipeline. Niche in → Shorts-ready video out → YouTube upload → analytics back into memory → next run is better.
 
-**Current pipeline** (Phase 5):
-`Topic (memory-aware) → Script → Hook (memory-aware, variants + self-rank) → Prediction → Voice (smart-tiered) → Timestamp (Whisper) → Video Selection (Pexels) → Video (autocomplete SEO, parallel download+meta) → Thumbnail (smart-tiered) → [Upload] → [Analytics → Feedback → Memory (Topic + Hook)]`
+**Current pipeline:**
+`Topic (memory + dedup) → Script → Hook (memory, variants + self-rank) → Prediction → Voice (smart-tiered) → Timestamp (Whisper) → Video Selection (Pexels) → Video (autocomplete SEO, parallel render) → [Thumbnail, off by default] → [Upload] → [Analytics → Feedback → Memory]`
 
 ## Architecture
 
 ```
 Next.js ─► Node API ─► BullMQ (Redis) ─► 3 Workers ─► Python AI / Pexels / OpenAI / YouTube
-                │     videoQueue            │         retries + model fallback throughout
-                │     uploadQueue           │
-                │     enrichmentQueue       ├─► FFmpeg, ElevenLabs/OpenAI TTS, DALL-E
-                └────► Postgres ◄───────────┘
-                       (runs, analytics, feedback,
-                        TopicMemory + HookMemory, Prediction)
+   ▲  ▲          │     videoQueue          │
+   │  │          │     uploadQueue         ├─► FFmpeg, ElevenLabs/OpenAI TTS, gpt-image-1
+   │  │          │     enrichmentQueue     │
+   │  │          └────► Postgres ◄─────────┘
+   │  │                 (runs, analytics, feedback,
+   │  │                  TopicMemory + HookMemory,
+   │  │                  PerformancePrediction,
+   │  │                  titleEmbedding for dedup)
+   │  │
+   │  └──── Redis pub/sub: pipeline:events
+   │           ▲
+   └──── SSE: GET /pipeline/:id/stream (live, no polling)
+
+    + node-cron in worker: auto-sync analytics on a schedule
 ```
 
-## What's in Phase 5
+- `apps/web` — Next.js 14 dashboard, React Query + SSE
+- `apps/api` — Express + Prisma, BullMQ producers, OAuth, SSE, analytics endpoints
+- `apps/worker` — 3 workers (video pipeline, YouTube upload, analytics enrichment) + cron scheduler
+- `ai-system` — FastAPI host for 10 agents + `/embeddings`
 
-### Reliability
-
-- **aiClient retries** with exponential backoff; skips 4xx (schema bugs — no point retrying)
-- **BullMQ attempts: 3** on every queue, exponential backoff between attempts
-- **LLM model fallback** — `script`, `hook`, `feedback`, `prediction` auto-downgrade `gpt-4o → gpt-4o-mini` if the primary keeps erroring
-- **Voice fallback** — ElevenLabs failure → OpenAI `tts-1`; pipeline never hard-stops on TTS
-
-### Self-improving feedback loop
-
-- **TopicMemory + HookMemory** — both use `text-embedding-3-small` over topic (title + angle); app-side cosine similarity picks top-3 for each new run
-- **Admission rules** — `views ≥ 10 AND ctr ≥ 2%` to keep noise out
-- **Memory consumption** — Topic agent + Hook agent both receive `past_{topics|hooks}` with performance tags and bias toward strong patterns, away from weak ones
-
-### Performance prediction (pre-upload)
-
-New `PREDICTION` stage runs after HOOK with `gpt-4o`, low temp:
-- `predicted_ctr`, `predicted_retention`, `score` (0–10), `reasoning`
-- Anchored with past-run data (same niche) to keep predictions calibrated
-- Drives cost-aware tier selection for voice and thumbnail
-- Predicted vs actual shown side-by-side in the dashboard once analytics arrives
-- **Failure-safe**: if prediction errors out, pipeline continues with a neutral `score=5` default
-
-### Cost-aware tiering
-
-| Tier | Voice | Thumbnail |
-|---|---|---|
-| score ≥ 7.5 | ElevenLabs (premium) | 1536×1024 `high` ~$0.15 |
-| 5 ≤ score < 7.5 | OpenAI `tts-1` (economy) | 1024×1024 `medium` ~$0.04 |
-| score < 5 | OpenAI `tts-1` (economy) | 1024×1024 `low` ~$0.02 |
-
-Rough cost-per-video at score=5 (mid): **~$0.05** vs Phase 4's flat ~$0.40 — **8–10× cheaper** for runs the system expects to underperform.
-
-### Parallelization
-
-The VIDEO stage used to be strictly sequential. Now:
-
-- `video_meta` LLM call + all scene download+prep run concurrently (`Promise.all`)
-- Per-scene: 6-way concurrent downloads (I/O bound) + 2-way concurrent FFmpeg prep (CPU bound) — implemented via tiny `pLimit` in [apps/worker/src/lib/concurrency.ts](apps/worker/src/lib/concurrency.ts)
-
-Typical saving on a 10-scene video: **~30–45s runtime reduction**.
-
-## Pipeline stages
-
-| Stage | Agent | Notes |
-|---|---|---|
-| `TOPIC` | topic (memory-aware) | top-3 `TopicMemory` passed in as `past_topics` |
-| `SCRIPT` | script | model fallback gpt-4o → gpt-4o-mini |
-| `HOOK` | hook (memory-aware) | top-3 `HookMemory` passed in as `past_hooks`; variants + self-rank |
-| `PREDICTION` | prediction | drives voice + thumbnail tiering |
-| `VOICE` | voice | tier: `premium` (ElevenLabs) or `economy` (OpenAI TTS) |
-| `TIMESTAMP` | timestamp | Whisper word-level alignment |
-| `VIDEO_SELECTION` | video_selection | LLM query → Pexels |
-| `VIDEO` | video_meta + worker | autocomplete SEO + **concurrent** clip pipeline |
-| `THUMBNAIL` | thumbnail | tier: `high` / `medium` / `low` quality |
-
-## Data surface
-
-- `PipelineRun` (per niche)
-- `Topic`, `Script`, `HookVariant` (×N), `VoiceAsset`, `Scene`, `Video`
-- `PerformancePrediction` (pre-upload)
-- `YouTubeUpload` (post-render, on-demand)
-- `VideoAnalytics` (snapshots, time series)
-- `FeedbackInsight` (post-analytics, 1:1)
-- `TopicMemory`, `HookMemory` (embedding-indexed learning store)
-
-## Admission + retrieval constants (tune in code, not runtime)
-
-All in [apps/worker/src/memory/vectorStore.ts](apps/worker/src/memory/vectorStore.ts):
-
-| Constant | Default | Effect |
-|---|---|---|
-| `ADMISSION_VIEWS_MIN` | 10 | skip runs with too little signal |
-| `ADMISSION_CTR_MIN` | 0.02 (2%) | skip runs that flopped |
-| `SIMILARITY_FLOOR` | 0.15 | skip wildly unrelated memories |
-
-Thresholds are deliberately low for early-stage channels — tighten once you have 50+ runs with real traffic.
-
-## Quick start (Phase 5)
+## Quick start
 
 ```bash
 cp .env.example .env
 # fill OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, PEXELS_API_KEY,
 # YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET
-docker compose down
 docker compose up --build
+open http://localhost:3000
 ```
 
-After first boot with Phase 5:
-1. Disconnect → Connect YouTube (new `yt-analytics.readonly` scope from Phase 4 stays granted; no re-consent needed if you already granted it)
-2. Run a niche → notice the extra PREDICTION stage on the timeline
-3. On the run detail page: new **Performance prediction** card appears (color-coded), with Predicted numbers and — once you click **Sync analytics** after a few hours — Actual numbers right beside them
-4. After a few completed/uploaded/analyzed runs, future TOPIC and HOOK stages will auto-populate "past runs" context — check the worker log for `memory retrieval` lines
+1. **Connect YouTube** (top right) — needs `youtube.upload` + `youtube.readonly` + `yt-analytics.readonly`.
+2. Enter a niche, pick duration (15s/25s/45s/75s/custom) and batch size (1/3/5/10) → watch stages light up **in real time** (SSE push).
+3. Preview video → pick privacy → **Upload**.
+4. **Analytics** tab (new) — channel-level dashboard: subs, views, watch time, top videos, time-series charts over 7/28/90/365 days.
+5. Per-run analytics: **Sync now** on the run page (or let the cron handle it) → metrics, AI feedback, memory admission.
+6. Future runs auto-retrieve similar past topics + hooks and bias toward what performed.
 
-## Roadmap (post-Phase 5)
+## Pipeline stages
 
-- **Scheduler** — cron-style auto-sync so the feedback loop runs hands-off
-- **Canva-style templated thumbnails** — separate subsystem (asset library, text layout engine, font picker); would slot in as a 4th thumbnail tier below `low`
-- **Local faster-whisper** — drop the Whisper API $0.007/run cost if you're CPU-rich
-- **pgvector** migration — once `TopicMemory`+`HookMemory` exceed ~10k rows
-- **Multi-tenant auth** — each user owns their own YouTubeAccount + memory pool
+| Stage | Agent | Cache source | Notes |
+|---|---|---|---|
+| `TOPIC` | topic (memory + dedup) | `Topic` row | top-3 `TopicMemory` as `past_topics`; retries up to 3× with `exclude_titles` if generated title cosine-matches a past `Topic.titleEmbedding` above 0.85 |
+| `SCRIPT` | script | `Script` row | model fallback `gpt-4o → gpt-4o-mini`; duration-aware (10–180s) |
+| `HOOK` | hook (memory) | `HookVariant[]` rows | top-3 `HookMemory` as `past_hooks` + N variants, self-ranked |
+| `PREDICTION` | prediction | `PerformancePrediction` row | drives voice + thumbnail tiering; neutral default on failure |
+| `VOICE` | voice | `VoiceAsset` + mp3 file | tier: `premium` (tts-1-hd), `economy` (tts-1), or `elite` (ElevenLabs, opt-in) |
+| `TIMESTAMP` | timestamp | last SUCCESS `AgentLog` | Whisper word-level alignment |
+| `VIDEO_SELECTION` | video_selection | `Scene[]` rows | LLM queries → Pexels portrait clips |
+| `VIDEO` | video_meta + worker | file checks on every clip + final mp4 | autocomplete SEO + concurrent render |
+| `THUMBNAIL` | thumbnail | png file on disk | **off by default** (see flag below) |
+
+Short videos (`target_duration_sec < 30`) automatically use 4s scene chunks instead of 7.5s so the cut cadence stays lively.
+
+## Cost per video
+
+Tier driven by `prediction.score` (0–10):
+
+| Tier | Voice | Thumbnail (when enabled) | Video + metadata | **Total** |
+|---|---|---|---|---|
+| **Strong** (≥ 7.5) | tts-1-hd ~$0.033 | 1536×1024 medium ~$0.07 | ~$0.02 | **~$0.13** |
+| Mid (5 – 7.5) | tts-1 ~$0.015 | 1024×1024 medium ~$0.04 | ~$0.02 | **~$0.075** |
+| Weak (< 5) | tts-1 ~$0.015 | 1024×1024 low ~$0.02 | ~$0.02 | **~$0.055** |
+
+With thumbnails off (default): **~$0.06 strong / ~$0.04 mid / ~$0.035 weak** per run.
+
+The per-run estimate lives on the run header — hover for the voice / whisper / thumbnail / llm breakdown. Source: [apps/api/src/services/cost.service.ts](apps/api/src/services/cost.service.ts).
+
+`elite` tier (ElevenLabs) is wired in but not auto-selected — opt in via direct agent call when you want premium narration.
+
+## Self-improving feedback loop
+
+```
+Upload → YouTube Analytics snapshot ─► Feedback agent ─► TopicMemory
+                                              │          HookMemory
+                                              ▼
+                                     Next run: Topic + Hook
+                                     agents retrieve top-3
+                                     similar past runs and
+                                     bias toward "strong" tags
+```
+
+- **Embeddings:** `text-embedding-3-small` (1536d) as `Float[]` on the row, app-side cosine similarity. Fine up to ~10k rows.
+- **Admission thresholds** (`vectorStore.ts`): `views ≥ 10 AND ctr ≥ 2%`.
+- **Similarity floors:** retrieval `> 0.15`, dedup `≥ 0.85`.
+- **Performance score:** `0.6 × (ctr/10) + 0.4 × (avp/100)`, clipped to [0,1]. CTR is stored in percent form (0–100) across the whole codebase — normalized from YouTube's 0–1 decimal at ingestion.
+
+## Duplicate-topic guard
+
+Before committing a run's topic:
+
+1. Topic agent generates `{title, angle, ...}`.
+2. Worker embeds `"title. angle"` and cosine-compares against every past `Topic.titleEmbedding`.
+3. If any match ≥ 0.85, the agent re-runs with an explicit `exclude_titles` list. Up to 3 attempts, then the last output is accepted.
+4. The embedding is persisted on the new `Topic` row for the next run to check against.
+
+This naturally spreads batch runs (`×5`, `×10`) apart: each new run sees the just-created siblings and is steered elsewhere.
+
+## Live events (SSE)
+
+Worker publishes to Redis `pipeline:events` on:
+- every stage transition (via `advanceStage()` helper)
+- pipeline DONE / FAILED
+- upload RUNNING / COMPLETED / FAILED
+- analytics snapshot persisted, feedback insight persisted
+
+API runs one Redis subscriber, fans into an in-process EventEmitter, and exposes **`GET /pipeline/:id/stream`** as SSE. Frontend `useRunEvents` invalidates the relevant React Query caches on every push. Polling demoted to a 10s fallback.
+
+## Resume-from-last-success
+
+Every stage output is persisted (DB row and/or file on disk). On any failure, run stays `FAILED` with a red **Retry from last success** button. Clicking it re-enters the pipeline; cached stages log `stage=X skipped (cached)` and only the broken step plus anything downstream re-runs.
+
+Saves:
+- Pexels downloads (per-scene file check)
+- FFmpeg per-scene prep + final concat
+- Whisper transcription
+- LLM calls (Topic, Script, Hook, Prediction, Video Meta, Thumbnail prompt)
+- ElevenLabs / OpenAI TTS
+
+Prediction failures deliberately stay *uncached* so a retry can try again.
+
+## Cron auto-sync
+
+`apps/worker/src/cron/analytics-sync.ts` runs on `ANALYTICS_SYNC_CRON` (default `0 */6 * * *` — every 6 hours). On each tick it enqueues an enrichment job for every `COMPLETED` upload, so analytics → feedback → memory keeps flowing without manual clicks. Set the env var to `""` to disable.
+
+## Batch generation
+
+`POST /pipeline/batch` body: `{ niche, count (2-10), durationSec }` → queues N runs in one request. The duplicate-topic guard spreads them automatically. UI: home-page picker (**Single / ×3 / ×5 / ×10**).
+
+## Channel analytics dashboard
+
+`/analytics` in the dashboard — channel-level overview via YouTube Data v3 + Analytics v2:
+
+- Channel overview: subs, total views, total videos, custom URL, thumbnail
+- Summary across selected range: views, watch time, net subs, likes/comments/shares, impressions, **CTR (percent form)**
+- Daily time-series mini-charts (pure SVG, no deps): views, watch time, subs gained, likes
+- Top videos table (sorted by views) with thumbnails linking to YouTube
+- Range picker: 7 / 28 / 90 / 365 days
+
+The OAuth helper + `parseAnalyticsCell` are shared (one copy per app in `integrations/youtube/`).
+
+## Reliability baseline
+
+- **aiClient** retries 5xx / network errors with exponential backoff (3 attempts), skips 4xx (schema bugs aren't retry-able).
+- **BullMQ** `attempts: 3` on all queues with exponential backoff.
+- **LLM model fallback** — `script`, `hook`, `feedback`, `prediction` auto-downgrade `gpt-4o → gpt-4o-mini` on sustained failure.
+- **Voice fallback** — ElevenLabs failure → OpenAI `tts-1-hd`; pipeline never hard-stops on TTS.
+- **Thumbnail non-fatal** — failure only logs; video still publishes.
+- **Tag sanitization** — strip `<`/`>`, drop empties, dedupe, enforce 500-char total budget before `videos.insert`.
+- **Typed API errors** — frontend's `ApiError` exposes `.status`; React Query retry predicates skip 4xx.
+
+## Feature flags (`.env`)
+
+| Flag | Default | Effect |
+|---|---|---|
+| `ENABLE_THUMBNAIL_AGENT` | `false` | Run the THUMBNAIL stage. Default off because YouTube rejects custom thumbnails from unverified channels. Verify at [youtube.com/verify](https://youtube.com/verify), then flip to `true`. |
+| `ANALYTICS_SYNC_CRON` | `0 */6 * * *` | node-cron expression for auto-enrichment. Empty string disables. |
+| `LOG_LEVEL` | `info` | `debug` exposes BullMQ events + aiClient input summaries + cache HIT lines. |
+| `WORKER_CONCURRENCY` | `1` | Parallel pipeline runs per worker. Watch FFmpeg CPU if you bump it. |
+
+## YouTube prereqs
+
+- Google Cloud project with **YouTube Data API v3** + **YouTube Analytics API v2** enabled
+- OAuth 2.0 Client (Web app), redirect URI `http://localhost:4000/auth/youtube/callback`
+- Scopes requested: `youtube.upload`, `youtube.readonly`, `yt-analytics.readonly`
+- **Custom thumbnails:** channel must be phone-verified ([youtube.com/verify](https://youtube.com/verify))
+- App stays in "Testing" mode — add each Google account at [OAuth consent → Audience](https://console.cloud.google.com/apis/credentials/consent) (up to 100 test users)
+
+## Data model
+
+```
+PipelineRun
+├─ Topic                  (+ titleEmbedding Float[] for dedup)
+├─ Script
+├─ HookVariant[]
+├─ PerformancePrediction  (pre-upload forecast)
+├─ VoiceAsset
+├─ Scene[]                (from Timestamp + Video Selection)
+├─ Video                  (videoPath, thumbnailPath, SEO meta)
+├─ YouTubeUpload          (privacy, youtubeVideoId, videoUrl)
+├─ VideoAnalytics[]       (time-series snapshots, CTR in percent)
+├─ FeedbackInsight        (1:1, latest wins)
+└─ AgentLog[]
+
+TopicMemory      (runId, niche, title, angle, embedding, performance)
+HookMemory       (runId, niche, topicTitle, hookText, embedding, performance)
+YouTubeAccount   (singleton id="default": accessToken, refreshToken, channelId)
+```
+
+## Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/pipeline/run` | start a single run (body: `{ niche, durationSec? }`) |
+| `POST` | `/pipeline/batch` | start N runs (body: `{ niche, count (2-10), durationSec? }`) |
+| `GET` | `/pipeline` | list recent runs |
+| `GET` | `/pipeline/:id` | full run detail + cost breakdown |
+| `GET` | `/pipeline/:id/logs` | per-stage agent logs |
+| `GET` | `/pipeline/:id/stream` | **SSE** — live events for this run |
+| `POST` | `/pipeline/:id/retry` | resume FAILED run from last success |
+| `POST` | `/pipeline/:id/upload` | upload completed video to YouTube |
+| `GET` | `/pipeline/:id/upload` | upload status |
+| `POST` | `/pipeline/:id/analytics/sync` | queue analytics refresh for this run |
+| `GET` | `/pipeline/:id/analytics` | latest snapshot + history + feedback |
+| `POST` | `/analytics/sync` | queue refresh for all uploads |
+| `GET` | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data |
+| `GET` | `/auth/youtube` | start OAuth flow |
+| `GET` | `/auth/youtube/callback` | OAuth return URL |
+| `GET` | `/auth/youtube/status` | connected? channel info |
+| `POST` | `/auth/youtube/disconnect` | drop stored tokens |
+| `GET` | `/media/*` | static-serve generated audio / video / thumbnail / subs |
 
 ## Project layout
 
 ```
-apps/web                   # Next.js 14 + React Query
-apps/api                   # Express + Prisma + 3 BullMQ producers + OAuth + analytics endpoints
+apps/web
+  app/
+    page.tsx                 # trigger form (niche + duration + batch size)
+    analytics/page.tsx       # channel-level dashboard
+    runs/[id]/page.tsx       # live-updating run detail (SSE)
+  components/
+    UploadCard, AnalyticsCard, FeedbackCard, PredictionCard,
+    AssetActions, YouTubeBadge
+apps/api
+  src/
+    events/bus.ts            # Redis sub + in-process EventEmitter
+    controllers/              # pipeline, upload, analytics, channel-analytics, youtube, events
+    services/
+      cost.service.ts        # per-run USD estimate
+      channel-analytics.service.ts
+      pipeline.service.ts
+    integrations/youtube/
+      oauth.ts               # authedClient, parseAnalyticsCell, NotConnectedError (shared)
 apps/worker
-  pipeline-runner.ts       # 9-stage memory-aware, tier-aware, parallelized pipeline
-  upload/                  # YouTube upload + analytics API clients
-  enrichment/              # analytics → feedback → Topic + Hook memory
-  memory/vectorStore       # app-side cosine similarity, admission + retrieval
-  lib/concurrency          # pLimit — bounded concurrency runner
-  lib/logger               # pino with run-id correlation
-ai-system/agents           # 10 agents: topic, script, hook, voice, timestamp,
-                           # video_selection, video_meta (+autocomplete), thumbnail,
-                           # feedback, prediction
-ai-system/lib
-  llm.py                   # chat_with_fallback (retry + model downgrade)
-  embeddings.py            # text-embedding-3-small helper
-  log.py                   # stdlib-backed request-id-correlated logger
+  src/
+    pipeline-runner.ts       # 9-stage pipeline, memory-aware, cache-resumable, event-publishing
+    cache/cache-resume.ts    # per-stage DB + file loaders
+    events/publisher.ts      # Redis pub helper
+    memory/vectorStore.ts    # Topic + Hook memory, duplicate-topic guard
+    upload/                  # YouTube upload + Analytics v2 client (uses shared helper)
+    enrichment/              # analytics → feedback → memory
+    media/                   # clipDownload, clipPrep, compose (FFmpeg)
+    cron/analytics-sync.ts   # node-cron for scheduled enrichment
+    lib/concurrency.ts       # pLimit bounded runner
+    integrations/youtube/client.ts  # authedYouTubeClient, parseAnalyticsCell (shared)
+ai-system
+  agents/                    # 10 agents: topic, script, hook, voice, timestamp,
+                             # video_selection, video_meta (+autocomplete),
+                             # thumbnail, feedback, prediction
+  lib/
+    llm.py                   # chat_with_fallback (retry + model downgrade)
+    embeddings.py            # text-embedding-3-small helper
+    log.py                   # stdlib logger with request-id correlation
 ```
+
+## Roadmap
+
+- Karaoke-style word-highlight subtitles (Whisper timings → per-word drawtext)
+- Background music track (Pixabay audio or Epidemic Sound), mood-matched
+- Scene transitions (fade / whip-pan) via FFmpeg filter_complex
+- A/B hook testing backed by real analytics instead of LLM self-score
+- Comment-to-topic pipeline (YouTube comments → LLM cluster → next niche suggestions)
+- Cross-post to TikTok + Instagram Reels + X
+- Multi-tenant auth — own YouTubeAccount + memory pool per user
+- S3-backed storage, pgvector (once memory > 10k rows), Prometheus/Grafana
+- Local `faster-whisper` to drop the $0.007/run Whisper cost
 
 ## Notes
 
-- Prediction failures don't kill the pipeline — a neutral `score=5` keeps downstream tiering sane.
-- Voice tier=economy uses OpenAI's `alloy` voice by default (overrideable in the agent).
-- The concurrent VIDEO stage means Pexels request bursts can look spikier to their API — 6 in flight is well under their documented limits but tunable in `pLimit(6)`.
+- API + worker run `prisma db push` at container boot — swap to `migrate deploy` when you commit a first migration with `prisma migrate dev --name init`.
+- Every Node ↔ Python call forwards `x-request-id` (runId prefix) so both sides' logs correlate.
+- The VIDEO stage runs up to 6 parallel Pexels downloads + 2 parallel FFmpeg preps — tune in `pipeline-runner.ts` if CPU-constrained.
+- `AnalyticsCard` and the channel dashboard display CTR in percent form. If you're querying `VideoAnalytics.ctr` directly in SQL for any custom analytics, note it's stored as percent (4.0 = 4%) too — consistent across the whole codebase.
+- Cron ticks enqueue per-run enrichment jobs with unique `jobId`s per tick, so double-scheduling from two workers won't duplicate work *within* a tick. For multi-worker scale-out, add a Redis SET-NX lock around the tick itself.

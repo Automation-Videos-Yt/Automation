@@ -1,8 +1,27 @@
 import { prisma } from "../db/prisma";
 import { videoQueue } from "../queues/videoQueue";
+import { estimateRunCost } from "./cost.service";
 import { scoped } from "../lib/logger";
 
 const log = scoped("pipeline-svc");
+
+/**
+ * Queue N pipeline runs for the same niche in one call. Each run is
+ * independent — the duplicate-topic guard in the worker already prevents
+ * two batch members from landing on the same topic.
+ */
+export async function createPipelineBatch(
+  niche: string,
+  count: number,
+  durationSec = 75
+) {
+  const runs = [];
+  for (let i = 0; i < count; i++) {
+    runs.push(await createPipelineRun(niche, durationSec));
+  }
+  log.info({ niche, count, runIds: runs.map((r) => r.id) }, "batch created");
+  return runs;
+}
 
 export async function createPipelineRun(niche: string, durationSec = 75) {
   const run = await prisma.pipelineRun.create({
@@ -32,7 +51,7 @@ export async function createPipelineRun(niche: string, durationSec = 75) {
 }
 
 export async function getPipelineRun(id: string) {
-  return prisma.pipelineRun.findUnique({
+  const run = await prisma.pipelineRun.findUnique({
     where: { id },
     include: {
       topic: true,
@@ -45,6 +64,9 @@ export async function getPipelineRun(id: string) {
       prediction: true,
     },
   });
+  if (!run) return null;
+  const cost = await estimateRunCost(id);
+  return { ...run, cost };
 }
 
 export class PipelineServiceError extends Error {

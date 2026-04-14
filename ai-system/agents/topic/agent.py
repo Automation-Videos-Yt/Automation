@@ -70,6 +70,16 @@ def _past_block(payload: TopicInput) -> str:
     return "\n".join(lines)
 
 
+def _exclude_block(payload: TopicInput) -> str:
+    if not payload.exclude_titles:
+        return ""
+    lines = ["\n\nDO NOT produce any of these titles (they already exist):"]
+    for t in payload.exclude_titles:
+        lines.append(f'- "{t}"')
+    lines.append("Choose a materially different angle or subject.")
+    return "\n".join(lines)
+
+
 def run(raw_input: dict) -> dict:
     payload = TopicInput.model_validate(raw_input)
     client = _get_client()
@@ -79,7 +89,11 @@ def run(raw_input: dict) -> dict:
         len(payload.past_topics),
     )
 
-    user_content = f"Niche: {payload.niche}{_past_block(payload)}"
+    user_content = (
+        f"Niche: {payload.niche}"
+        f"{_past_block(payload)}"
+        f"{_exclude_block(payload)}"
+    )
 
     with timed(log, "openai.chat.completions", model=settings.openai_model_fast):
         response = client.chat.completions.create(
