@@ -5,34 +5,74 @@ import { scoped } from "../lib/logger";
 
 const log = scoped("pipeline-svc");
 
+function normalizeLanguageCodes(codes: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of codes) {
+    const code = raw.trim().toLowerCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    normalized.push(code);
+  }
+  return normalized.length > 0 ? normalized : ["en"];
+}
+
 /**
- * Queue N pipeline runs for the same niche in one call. Each run is
- * independent — the duplicate-topic guard in the worker already prevents
- * two batch members from landing on the same topic.
+ * Queue N pipeline runs per selected language in one call. Each run is
+ * independent — the duplicate-topic guard in the worker helps prevent
+ * two same-language batch members from landing on the same topic.
  */
 export async function createPipelineBatch(
   niche: string,
   count: number,
-  durationSec = 75
+  durationSec = 75,
+  languageCodes: string[] = ["en"],
 ) {
+  const normalizedLanguageCodes = normalizeLanguageCodes(languageCodes);
   const runs = [];
   for (let i = 0; i < count; i++) {
-    runs.push(await createPipelineRun(niche, durationSec));
+    for (const languageCode of normalizedLanguageCodes) {
+      runs.push(await createPipelineRun(niche, durationSec, languageCode));
+    }
   }
-  log.info({ niche, count, runIds: runs.map((r) => r.id) }, "batch created");
+  log.info(
+    {
+      niche,
+      count,
+      languageCodes: normalizedLanguageCodes,
+      totalRuns: runs.length,
+      runIds: runs.map((r) => r.id),
+    },
+    "batch created",
+  );
   return runs;
 }
 
-export async function createPipelineRun(niche: string, durationSec = 75) {
+export async function createPipelineRun(
+  niche: string,
+  durationSec = 75,
+  languageCode = "en",
+) {
+  const normalizedLanguageCode =
+    normalizeLanguageCodes([languageCode])[0] ?? "en";
   const run = await prisma.pipelineRun.create({
     data: {
       niche,
+      languageCode: normalizedLanguageCode,
       targetDurationSec: durationSec,
       stage: "QUEUED",
       status: "QUEUED",
     },
   });
-  log.info({ runId: run.id, niche, durationSec }, "run created");
+  log.info(
+    {
+      runId: run.id,
+      niche,
+      durationSec,
+      languageCode: normalizedLanguageCode,
+    },
+    "run created",
+  );
 
   await videoQueue.add(
     "run-pipeline",
@@ -43,7 +83,7 @@ export async function createPipelineRun(niche: string, durationSec = 75) {
       backoff: { type: "exponential", delay: 5_000 },
       removeOnComplete: { count: 200 },
       removeOnFail: { count: 200 },
-    }
+    },
   );
   log.info({ runId: run.id }, "job enqueued");
 
@@ -70,7 +110,10 @@ export async function getPipelineRun(id: string) {
 }
 
 export class PipelineServiceError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -87,13 +130,13 @@ export async function retryPipelineRun(id: string) {
   if (run.status === "RUNNING" || run.status === "QUEUED") {
     throw new PipelineServiceError(
       "ALREADY_RUNNING",
-      `run is ${run.status} — nothing to retry`
+      `run is ${run.status} — nothing to retry`,
     );
   }
   if (run.status === "COMPLETED") {
     throw new PipelineServiceError(
       "ALREADY_DONE",
-      "run already completed — nothing to retry"
+      "run already completed — nothing to retry",
     );
   }
 
@@ -111,7 +154,7 @@ export async function retryPipelineRun(id: string) {
       backoff: { type: "exponential", delay: 5_000 },
       removeOnComplete: { count: 200 },
       removeOnFail: { count: 200 },
-    }
+    },
   );
   log.info({ runId: id, stage: run.stage }, "retry enqueued");
   return updated;

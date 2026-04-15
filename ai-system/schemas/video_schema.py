@@ -5,6 +5,7 @@ class VideoMetaInput(BaseModel):
     title: str
     angle: str
     script_body: str
+    language_code: str = Field(default="en", min_length=2, max_length=10)
 
 
 class VideoMetaOutput(BaseModel):

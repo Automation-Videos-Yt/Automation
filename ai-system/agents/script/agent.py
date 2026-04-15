@@ -14,6 +14,7 @@ Produce a script structured as: HOOK (1-2 sentences, <=25 words), BODY (informat
 Constraints:
 - Narration should fit the target duration, assuming roughly 2.5 words per second.
 - Hook must grab attention in the first 3 seconds (claim, question, or contrarian take).
+- Write all narration in the requested target language code.
 - No stage directions, no markdown, no emojis.
 - Body flows as spoken prose; avoid bullet lists.
 Return only the JSON object the schema requests."""
@@ -57,6 +58,7 @@ def run(raw_input: dict) -> dict:
     user_msg = (
         f"Topic title: {payload.topic_title}\n"
         f"Topic angle: {payload.topic_angle}\n"
+        f"Target language code: {payload.language_code}\n"
         f"Target duration: {payload.target_duration_sec} seconds\n"
         f"Target word count: approximately {int(payload.target_duration_sec * WORDS_PER_SECOND)} words"
     )

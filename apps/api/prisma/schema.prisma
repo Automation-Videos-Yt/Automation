@@ -51,6 +51,7 @@ enum UploadPrivacy {
 model PipelineRun {
   id                String        @id @default(cuid())
   niche             String
+  languageCode      String        @default("en")
   targetDurationSec Int           @default(75)
   stage             PipelineStage @default(QUEUED)
   status            RunStatus     @default(QUEUED)

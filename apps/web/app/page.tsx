@@ -13,22 +13,55 @@ const PRESETS: Preset[] = [
   { label: "Long · 75s", value: 75 },
 ];
 
+const LANGUAGE_OPTIONS = [
+  { code: "en", label: "English" },
+  { code: "es", label: "Spanish" },
+  { code: "pt", label: "Portuguese" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "hi", label: "Hindi" },
+  { code: "ar", label: "Arabic" },
+  { code: "id", label: "Indonesian" },
+  { code: "ja", label: "Japanese" },
+];
+
 export default function HomePage() {
   const [niche, setNiche] = useState("");
   const [durationSec, setDurationSec] = useState<number>(75);
   const [custom, setCustom] = useState(false);
   const [count, setCount] = useState<number>(1);
+  const [languageCodes, setLanguageCodes] = useState<string[]>(["en"]);
   const router = useRouter();
 
+  const plannedRuns = count * Math.max(languageCodes.length, 1);
+  const isMultiCreate = count > 1 || languageCodes.length > 1;
+
+  function toggleLanguage(code: string) {
+    setLanguageCodes((prev) => {
+      if (prev.includes(code)) {
+        // Always keep at least one language selected.
+        return prev.length > 1 ? prev.filter((c) => c !== code) : prev;
+      }
+      return [...prev, code];
+    });
+  }
+
   const single = useMutation({
-    mutationFn: (v: { niche: string; durationSec: number }) =>
-      api.createRun(v.niche, v.durationSec),
+    mutationFn: (v: {
+      niche: string;
+      durationSec: number;
+      languageCode: string;
+    }) => api.createRun(v.niche, v.durationSec, v.languageCode),
     onSuccess: (run) => router.push(`/runs/${run.id}`),
   });
 
   const batch = useMutation({
-    mutationFn: (v: { niche: string; durationSec: number; count: number }) =>
-      api.createBatch(v.niche, v.count, v.durationSec),
+    mutationFn: (v: {
+      niche: string;
+      durationSec: number;
+      count: number;
+      languageCodes: string[];
+    }) => api.createBatch(v.niche, v.count, v.durationSec, v.languageCodes),
     onSuccess: () => router.push("/runs"),
   });
 
@@ -40,8 +73,9 @@ export default function HomePage() {
       <div>
         <h1 className="text-3xl font-semibold">Generate a video</h1>
         <p className="text-white/60 mt-1">
-          Pick a niche and duration. The pipeline picks a topic, writes a script,
-          generates TTS, and renders a vertical video with burned-in subtitles.
+          Pick a niche and duration. The pipeline picks a topic, writes a
+          script, generates TTS, and renders a vertical video with burned-in
+          subtitles.
         </p>
       </div>
 
@@ -50,10 +84,14 @@ export default function HomePage() {
           e.preventDefault();
           const trimmed = niche.trim();
           if (trimmed.length < 3) return;
-          if (count > 1) {
-            batch.mutate({ niche: trimmed, durationSec, count });
+          if (isMultiCreate) {
+            batch.mutate({ niche: trimmed, durationSec, count, languageCodes });
           } else {
-            single.mutate({ niche: trimmed, durationSec });
+            single.mutate({
+              niche: trimmed,
+              durationSec,
+              languageCode: languageCodes[0] ?? "en",
+            });
           }
         }}
         className="space-y-4 max-w-xl"
@@ -74,12 +112,12 @@ export default function HomePage() {
             className="rounded-md bg-white text-black px-4 py-2 font-medium disabled:opacity-50"
           >
             {pending
-              ? count > 1
-                ? `Queueing ${count}…`
+              ? isMultiCreate
+                ? `Queueing ${plannedRuns}…`
                 : "Starting..."
-              : count > 1
-              ? `Start ${count} runs`
-              : "Start run"}
+              : isMultiCreate
+                ? `Start ${plannedRuns} runs`
+                : "Start run"}
           </button>
         </div>
 
@@ -127,7 +165,7 @@ export default function HomePage() {
                 value={durationSec}
                 onChange={(e) =>
                   setDurationSec(
-                    Math.max(10, Math.min(180, Number(e.target.value) || 10))
+                    Math.max(10, Math.min(180, Number(e.target.value) || 10)),
                   )
                 }
                 className="w-24 rounded-md bg-white/5 border border-white/10 px-2 py-1.5 text-sm"
@@ -136,6 +174,35 @@ export default function HomePage() {
           </div>
           <div className="text-xs text-white/50">
             10–180s · short durations auto-use 4s scene chunks instead of 7.5s
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-white/50">
+            Languages
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {LANGUAGE_OPTIONS.map((lang) => {
+              const active = languageCodes.includes(lang.code);
+              return (
+                <button
+                  key={lang.code}
+                  type="button"
+                  onClick={() => toggleLanguage(lang.code)}
+                  className={`text-sm rounded-md border px-3 py-1.5 ${
+                    active
+                      ? "bg-white text-black border-white"
+                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                  }`}
+                >
+                  {lang.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-xs text-white/50">
+            Select one or more languages. Each selected language generates its
+            own video run.
           </div>
         </div>
 
@@ -159,16 +226,16 @@ export default function HomePage() {
               </button>
             ))}
             <span className="text-xs text-white/50">
-              duplicate-topic guard prevents the batch from landing on the same idea
+              planned jobs: {plannedRuns} ({count} per language ×{" "}
+              {languageCodes.length} language
+              {languageCodes.length === 1 ? "" : "s"})
             </span>
           </div>
         </div>
       </form>
 
       {err && (
-        <div className="text-red-400 text-sm">
-          {(err as Error).message}
-        </div>
+        <div className="text-red-400 text-sm">{(err as Error).message}</div>
       )}
     </div>
   );

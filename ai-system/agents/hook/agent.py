@@ -18,6 +18,7 @@ Hard rules:
 - Each variant is ONE sentence, <=20 words.
 - No emojis, no stage directions, no hashtags.
 - Must not misrepresent the script.
+- Write all hook variants in the requested target language code.
 - Score 0-10 on probable 3-second retention strength. Explain briefly.
 - Pick the best by chosen_index (0-based).
 
@@ -92,6 +93,7 @@ def run(raw_input: dict) -> dict:
     user_msg = (
         f"Topic title: {payload.topic_title}\n"
         f"Topic angle: {payload.topic_angle}\n"
+        f"Target language code: {payload.language_code}\n"
         f"Original hook: {payload.original_hook}\n"
         f"Script body (context only, DO NOT include in hook):\n{payload.script_body}"
         f"{_past_block(payload)}\n\n"

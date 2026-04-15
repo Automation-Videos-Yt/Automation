@@ -41,7 +41,7 @@ open http://localhost:3000
 ```
 
 1. **Connect YouTube** (top right) — needs `youtube.upload` + `youtube.readonly` + `yt-analytics.readonly`.
-2. Enter a niche, pick duration (15s/25s/45s/75s/custom) and batch size (1/3/5/10) → watch stages light up **in real time** (SSE push).
+2. Enter a niche, pick duration, select one or more output languages, and choose batch size (1/3/5/10) → watch stages light up **in real time** (SSE push).
 3. Preview video → pick privacy → **Upload**.
 4. **Analytics** tab (new) — channel-level dashboard: subs, views, watch time, top videos, time-series charts over 7/28/90/365 days.
 5. Per-run analytics: **Sync now** on the run page (or let the cron handle it) → metrics, AI feedback, memory admission.
@@ -152,7 +152,13 @@ Prediction failures deliberately stay _uncached_ so a retry can try again.
 
 ## Batch generation
 
-`POST /pipeline/batch` body: `{ niche, count (2-10), durationSec }` → queues N runs in one request. The duplicate-topic guard spreads them automatically. UI: home-page picker (**Single / ×3 / ×5 / ×10**).
+`POST /pipeline/batch` body: `{ niche, count (1-10), durationSec, languageCodes? }`.
+
+- `count` = runs per language
+- `languageCodes` defaults to `['en']`
+- total enqueued runs = `count × languageCodes.length`
+
+Example: `count=3` and `languageCodes=['en','es','hi']` queues `9` runs.
 
 ## Channel analytics dashboard
 
@@ -220,26 +226,26 @@ YouTubeAccount   (singleton id="default": accessToken, refreshToken, channelId)
 
 ## Endpoints
 
-| Method | Path                                     | Purpose                                                      |
-| ------ | ---------------------------------------- | ------------------------------------------------------------ |
-| `POST` | `/pipeline/run`                          | start a single run (body: `{ niche, durationSec? }`)         |
-| `POST` | `/pipeline/batch`                        | start N runs (body: `{ niche, count (2-10), durationSec? }`) |
-| `GET`  | `/pipeline`                              | list recent runs                                             |
-| `GET`  | `/pipeline/:id`                          | full run detail + cost breakdown                             |
-| `GET`  | `/pipeline/:id/logs`                     | per-stage agent logs                                         |
-| `GET`  | `/pipeline/:id/stream`                   | **SSE** — live events for this run                           |
-| `POST` | `/pipeline/:id/retry`                    | resume FAILED run from last success                          |
-| `POST` | `/pipeline/:id/upload`                   | upload completed video to YouTube                            |
-| `GET`  | `/pipeline/:id/upload`                   | upload status                                                |
-| `POST` | `/pipeline/:id/analytics/sync`           | queue analytics refresh for this run                         |
-| `GET`  | `/pipeline/:id/analytics`                | latest snapshot + history + feedback                         |
-| `POST` | `/analytics/sync`                        | queue refresh for all uploads                                |
-| `GET`  | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data                                 |
-| `GET`  | `/auth/youtube`                          | start OAuth flow                                             |
-| `GET`  | `/auth/youtube/callback`                 | OAuth return URL                                             |
-| `GET`  | `/auth/youtube/status`                   | connected? channel info                                      |
-| `POST` | `/auth/youtube/disconnect`               | drop stored tokens                                           |
-| `GET`  | `/media/*`                               | static-serve generated audio / video / thumbnail / subs      |
+| Method | Path                                     | Purpose                                                                                    |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `POST` | `/pipeline/run`                          | start one run (body: `{ niche, durationSec?, languageCode? }`)                             |
+| `POST` | `/pipeline/batch`                        | start multilingual batches (body: `{ niche, count (1-10), durationSec?, languageCodes? }`) |
+| `GET`  | `/pipeline`                              | list recent runs                                                                           |
+| `GET`  | `/pipeline/:id`                          | full run detail + cost breakdown                                                           |
+| `GET`  | `/pipeline/:id/logs`                     | per-stage agent logs                                                                       |
+| `GET`  | `/pipeline/:id/stream`                   | **SSE** — live events for this run                                                         |
+| `POST` | `/pipeline/:id/retry`                    | resume FAILED run from last success                                                        |
+| `POST` | `/pipeline/:id/upload`                   | upload completed video to YouTube                                                          |
+| `GET`  | `/pipeline/:id/upload`                   | upload status                                                                              |
+| `POST` | `/pipeline/:id/analytics/sync`           | queue analytics refresh for this run                                                       |
+| `GET`  | `/pipeline/:id/analytics`                | latest snapshot + history + feedback                                                       |
+| `POST` | `/analytics/sync`                        | queue refresh for all uploads                                                              |
+| `GET`  | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data                                                               |
+| `GET`  | `/auth/youtube`                          | start OAuth flow                                                                           |
+| `GET`  | `/auth/youtube/callback`                 | OAuth return URL                                                                           |
+| `GET`  | `/auth/youtube/status`                   | connected? channel info                                                                    |
+| `POST` | `/auth/youtube/disconnect`               | drop stored tokens                                                                         |
+| `GET`  | `/media/*`                               | static-serve generated audio / video / thumbnail / subs                                    |
 
 ## Project layout
 

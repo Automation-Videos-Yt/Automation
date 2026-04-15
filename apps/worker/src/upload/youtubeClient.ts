@@ -16,6 +16,8 @@ export type UploadOptions = {
   title: string;
   description: string;
   tags: string[];
+  defaultLanguage?: string;
+  defaultAudioLanguage?: string;
   privacyStatus: "private" | "unlisted" | "public";
   categoryId?: string; // default "22" (People & Blogs)
 };
@@ -66,10 +68,11 @@ export async function uploadToYouTube(opts: UploadOptions): Promise<{
       title: opts.title,
       tagCountRaw: opts.tags.length,
       tagCountClean: tags.length,
+      language: opts.defaultLanguage,
       privacy: opts.privacyStatus,
       file: opts.videoPath,
     },
-    "videos.insert start"
+    "videos.insert start",
   );
 
   const insertRes = await youtube.videos.insert({
@@ -80,6 +83,12 @@ export async function uploadToYouTube(opts: UploadOptions): Promise<{
         description: opts.description.slice(0, 5000),
         tags,
         categoryId: opts.categoryId ?? "22",
+        ...(opts.defaultLanguage
+          ? { defaultLanguage: opts.defaultLanguage }
+          : {}),
+        ...(opts.defaultAudioLanguage
+          ? { defaultAudioLanguage: opts.defaultAudioLanguage }
+          : {}),
       },
       status: {
         privacyStatus: opts.privacyStatus,

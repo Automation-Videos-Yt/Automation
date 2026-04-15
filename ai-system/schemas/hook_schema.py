@@ -14,6 +14,7 @@ class HookInput(BaseModel):
     topic_angle: str
     script_body: str
     original_hook: str
+    language_code: str = Field(default="en", min_length=2, max_length=10)
     variants: int = Field(default=3, ge=2, le=6)
     past_hooks: list[PastHookContext] = Field(default_factory=list)
 
