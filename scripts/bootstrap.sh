@@ -9,4 +9,4 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-docker compose up --build
+npm run docker:up

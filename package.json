@@ -13,7 +13,13 @@
     "dev:web": "npm --workspace apps/web run dev",
     "prisma:generate": "npm --workspace apps/api run prisma:generate",
     "prisma:migrate": "npm --workspace apps/api run prisma:migrate",
-    "build": "npm --workspaces run build --if-present"
+    "build": "npm --workspaces run build --if-present",
+    "docker:tag": "node scripts/docker-compose-versioned.mjs",
+    "docker:compose": "node scripts/docker-compose-versioned.mjs",
+    "docker:up": "node scripts/docker-compose-versioned.mjs up --build",
+    "docker:up:split": "node scripts/docker-compose-versioned.mjs --profile split-workers up -d --build worker-video worker-upload worker-enrichment",
+    "docker:build": "node scripts/docker-compose-versioned.mjs build",
+    "docker:down": "docker compose down"
   },
   "engines": {
     "node": ">=20"

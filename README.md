@@ -36,9 +36,11 @@ Next.js ─► Node API ─► BullMQ (Redis) ─► 3 Workers ─► Python AI 
 cp .env.example .env
 # fill OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, PEXELS_API_KEY,
 # YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET
-docker compose up --build
+npm run docker:up
 open http://localhost:3000
 ```
+
+`npm run docker:up` computes a content-hash image tag (for example `v-a1b2c3d4e5f6`) and passes it as `IMAGE_TAG`, so built images are versioned and never tagged as `latest`.
 
 1. **Connect YouTube** (top right) — needs `youtube.upload` + `youtube.readonly` + `yt-analytics.readonly`.
 2. Enter a niche, pick duration, select one or more output languages, and choose batch size (1/3/5/10) → watch stages light up **in real time** (SSE push).
@@ -53,10 +55,10 @@ By default, one `worker` process consumes all queues. For better throughput and 
 
 ```bash
 # start only dedicated split workers
-docker compose --profile split-workers up -d worker-video worker-upload worker-enrichment
+npm run docker:up:split
 
 # scale heavy video workers independently
-docker compose --profile split-workers up -d --scale worker-video=2 worker-video worker-upload worker-enrichment
+npm run docker:compose -- --profile split-workers up -d --scale worker-video=2 worker-video worker-upload worker-enrichment
 ```
 
 Worker roles are selected via `WORKER_ROLE=all|video|upload|enrichment`.

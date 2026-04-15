@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.version=$APP_VERSION
+
 # ffmpeg + a font that DejaVu Sans resolves to (fontconfig is required for the subtitles filter).
 RUN apk add --no-cache ffmpeg ttf-dejavu fontconfig openssl && fc-cache -f
 

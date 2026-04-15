@@ -26,9 +26,12 @@ services:
       retries: 15
 
   api:
+    image: ai-youtube-automation/api:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.api
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
@@ -49,9 +52,12 @@ services:
     command: sh -c "npx prisma db push --accept-data-loss --skip-generate && npx tsx src/index.ts"
 
   worker:
+    image: ai-youtube-automation/worker:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.worker
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
@@ -72,13 +78,17 @@ services:
         condition: service_started
 
   # Optional split workers. Start them with:
-  # docker compose --profile split-workers up -d worker-video worker-upload worker-enrichment
+  # npm run docker:up:split
+  # or: npm run docker:compose -- --profile split-workers up -d --scale worker-video=2 worker-video worker-upload worker-enrichment
   # (and stop the default `worker` service when using split mode)
   worker-video:
     profiles: ["split-workers"]
+    image: ai-youtube-automation/worker:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.worker
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
@@ -101,9 +111,12 @@ services:
 
   worker-upload:
     profiles: ["split-workers"]
+    image: ai-youtube-automation/worker:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.worker
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
@@ -126,9 +139,12 @@ services:
 
   worker-enrichment:
     profiles: ["split-workers"]
+    image: ai-youtube-automation/worker:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.worker
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
@@ -150,9 +166,12 @@ services:
         condition: service_started
 
   ai:
+    image: ai-youtube-automation/ai:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.ai
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     env_file: .env
     environment:
       STORAGE_PATH: /storage
@@ -162,9 +181,12 @@ services:
       - "8000:8000"
 
   web:
+    image: ai-youtube-automation/web:${IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        APP_VERSION: ${IMAGE_TAG:-dev}
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4000
     ports:
