@@ -50,6 +50,7 @@ enum UploadPrivacy {
 
 model PipelineRun {
   id                String        @id @default(cuid())
+  experimentId      String?
   niche             String
   targetDurationSec Int           @default(75)
   stage             PipelineStage @default(QUEUED)
@@ -72,6 +73,7 @@ model PipelineRun {
   prediction   PerformancePrediction?
 
   @@index([status, stage])
+  @@index([experimentId])
   @@index([createdAt])
 }
 
