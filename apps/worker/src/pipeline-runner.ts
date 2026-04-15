@@ -28,6 +28,8 @@ import {
 import { pLimit } from "./lib/concurrency";
 import { publishRunEvent } from "./events/publisher";
 import { scoped } from "./lib/logger";
+import { videoQueue } from "./queues/videoQueue";
+import { enqueueAutoUploadForRun } from "./upload/auto-upload";
 
 // Portrait 9:16 (YouTube Shorts / TikTok / Reels).
 const TARGET_WIDTH = 1080;
@@ -126,11 +128,160 @@ function voiceTierFromScore(score: number): "elite" | "premium" | "economy" {
   return score >= 7.5 ? "premium" : "economy";
 }
 
+type SeedHookVariantRunsInput = {
+  parentRunId: string;
+  niche: string;
+  targetDurationSec: number;
+  topic: TopicOutput;
+  topicEmbedding: number[];
+  scriptBody: string;
+  scriptCta: string;
+  scriptWordCount: number;
+  scriptDurationEstimateSec: number;
+  variants: HookVariantOut[];
+  chosenIndex: number;
+};
+
+async function maybeSeedHookVariantRuns(
+  input: SeedHookVariantRunsInput,
+): Promise<string[]> {
+  if (!env.ENABLE_HOOK_AB_TESTING) return [];
+
+  const targetVariants = Math.min(env.HOOK_AB_VARIANTS, input.variants.length);
+  if (targetVariants < 2) return [];
+
+  const existingSeedLog = await prisma.agentLog.findFirst({
+    where: {
+      runId: input.parentRunId,
+      agent: "hook_ab_seed",
+      status: "SUCCESS",
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (existingSeedLog?.outputJson) {
+    const parsed = existingSeedLog.outputJson as { childRunIds?: string[] };
+    if (Array.isArray(parsed.childRunIds) && parsed.childRunIds.length > 0) {
+      return parsed.childRunIds;
+    }
+  }
+
+  const seedInput = {
+    targetVariants,
+    chosenIndex: input.chosenIndex,
+    variants: input.variants.map((v, i) => ({
+      index: i,
+      text: v.text,
+      score: v.score,
+    })),
+  };
+
+  const started = Date.now();
+  try {
+    const indicesToSpawn = input.variants
+      .map((_, i) => i)
+      .filter((i) => i !== input.chosenIndex)
+      .slice(0, targetVariants - 1);
+
+    const childRunIds: string[] = [];
+    for (const variantIndex of indicesToSpawn) {
+      const variant = input.variants[variantIndex];
+
+      const childRun = await prisma.$transaction(async (tx) => {
+        const child = await tx.pipelineRun.create({
+          data: {
+            niche: input.niche,
+            targetDurationSec: input.targetDurationSec,
+            stage: "QUEUED",
+            status: "QUEUED",
+            currentAgent: null,
+          },
+        });
+
+        await tx.topic.create({
+          data: {
+            runId: child.id,
+            title: input.topic.title,
+            angle: input.topic.angle,
+            rationale: input.topic.rationale,
+            trendScore: input.topic.trend_score,
+            titleEmbedding: input.topicEmbedding,
+          },
+        });
+
+        await tx.script.create({
+          data: {
+            runId: child.id,
+            hook: variant.text,
+            body: input.scriptBody,
+            cta: input.scriptCta,
+            wordCount: input.scriptWordCount,
+            durationEstimateSec: input.scriptDurationEstimateSec,
+          },
+        });
+
+        await tx.hookVariant.create({
+          data: {
+            runId: child.id,
+            index: 0,
+            text: variant.text,
+            score: variant.score,
+            reasoning: variant.reasoning,
+            chosen: true,
+          },
+        });
+
+        return child;
+      });
+
+      await videoQueue.add(
+        "run-pipeline",
+        { runId: childRun.id },
+        {
+          jobId: childRun.id,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 5_000 },
+          removeOnComplete: { count: 200 },
+          removeOnFail: { count: 200 },
+        },
+      );
+
+      childRunIds.push(childRun.id);
+    }
+
+    await prisma.agentLog.create({
+      data: {
+        runId: input.parentRunId,
+        agent: "hook_ab_seed",
+        inputJson: seedInput,
+        outputJson: { childRunIds },
+        durationMs: Date.now() - started,
+        status: "SUCCESS",
+      },
+    });
+
+    return childRunIds;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await prisma.agentLog.create({
+      data: {
+        runId: input.parentRunId,
+        agent: "hook_ab_seed",
+        inputJson: seedInput,
+        outputJson: undefined,
+        durationMs: Date.now() - started,
+        status: "FAILED",
+        errorMessage: message,
+      },
+    });
+    throw err;
+  }
+}
+
 async function withAgentLog<T>(
   runId: string,
   agent: string,
   input: unknown,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
 ): Promise<T> {
   const started = Date.now();
   try {
@@ -209,7 +360,7 @@ export async function runPipeline(runId: string): Promise<void> {
       if (pastTopics.length > 0) {
         log.info(
           { count: pastTopics.length },
-          "topic stage augmented with past memory"
+          "topic stage augmented with past memory",
         );
       }
 
@@ -234,16 +385,16 @@ export async function runPipeline(runId: string): Promise<void> {
           () =>
             runAgent<typeof topicInput, TopicOutput>("topic", topicInput, {
               runId,
-            })
+            }),
         );
         topicEmbedding = await embedTopicForDedup(
           generated.title,
-          generated.angle
+          generated.angle,
         );
         const dup = await findDuplicateTopic(
           generated.title,
           generated.angle,
-          runId
+          runId,
         );
         if (!dup) break;
         log.warn(
@@ -252,12 +403,12 @@ export async function runPipeline(runId: string): Promise<void> {
             duplicateOf: dup.title,
             similarity: dup.similarity.toFixed(3),
           },
-          "topic too close to a past run — retrying with exclusion"
+          "topic too close to a past run — retrying with exclusion",
         );
         excludeTitles.push(generated.title, dup.title);
         if (attempt === MAX_TOPIC_ATTEMPTS) {
           log.warn(
-            "max topic retries reached — accepting last generated topic"
+            "max topic retries reached — accepting last generated topic",
           );
         }
       }
@@ -279,7 +430,7 @@ export async function runPipeline(runId: string): Promise<void> {
           retriedFrom: excludeTitles.length / 2,
           stageMs: Date.now() - stageT0,
         },
-        "stage=TOPIC done"
+        "stage=TOPIC done",
       );
     }
 
@@ -301,7 +452,9 @@ export async function runPipeline(runId: string): Promise<void> {
         target_duration_sec: run.targetDurationSec,
       };
       script = await withAgentLog(runId, "script", scriptInput, () =>
-        runAgent<typeof scriptInput, ScriptOutput>("script", scriptInput, { runId })
+        runAgent<typeof scriptInput, ScriptOutput>("script", scriptInput, {
+          runId,
+        }),
       );
       await prisma.script.create({
         data: {
@@ -319,7 +472,7 @@ export async function runPipeline(runId: string): Promise<void> {
           estSec: script.duration_estimate_sec,
           stageMs: Date.now() - stageS0,
         },
-        "stage=SCRIPT done"
+        "stage=SCRIPT done",
       );
     }
 
@@ -328,29 +481,36 @@ export async function runPipeline(runId: string): Promise<void> {
     // ============================================================
     const stageH0 = Date.now();
     await advanceStage("HOOK", "hook");
+    let hookVariantsForExperiment: HookVariantOut[] = [];
+    let chosenHookIndex = 0;
     const cachedHook = await loadHook(runId);
     if (cachedHook) {
       script.hook = cachedHook.chosen_text;
+      hookVariantsForExperiment = cachedHook.variants;
+      chosenHookIndex = cachedHook.chosen_index;
       log.info(
         { chosen: cachedHook.chosen_text },
-        "stage=HOOK skipped (cached)"
+        "stage=HOOK skipped (cached)",
       );
     } else {
       log.info("stage=HOOK start");
       const pastHooks = await retrievePastHooks(topic.title, topic.angle, 3);
       if (pastHooks.length > 0) {
-        log.info({ count: pastHooks.length }, "hook stage augmented with past memory");
+        log.info(
+          { count: pastHooks.length },
+          "hook stage augmented with past memory",
+        );
       }
       const hookInput = {
         topic_title: topic.title,
         topic_angle: topic.angle,
         script_body: script.body,
         original_hook: script.hook,
-        variants: 3,
+        variants: env.ENABLE_HOOK_AB_TESTING ? env.HOOK_AB_VARIANTS : 3,
         past_hooks: pastHooks,
       };
       const hookRes = await withAgentLog(runId, "hook", hookInput, () =>
-        runAgent<typeof hookInput, HookOutput>("hook", hookInput, { runId })
+        runAgent<typeof hookInput, HookOutput>("hook", hookInput, { runId }),
       );
 
       await prisma.hookVariant.createMany({
@@ -368,6 +528,8 @@ export async function runPipeline(runId: string): Promise<void> {
         where: { runId },
         data: { hook: chosenHook },
       });
+      hookVariantsForExperiment = hookRes.variants;
+      chosenHookIndex = hookRes.chosen_index;
       script.hook = chosenHook;
       log.info(
         {
@@ -375,8 +537,34 @@ export async function runPipeline(runId: string): Promise<void> {
           chosenHook,
           stageMs: Date.now() - stageH0,
         },
-        "stage=HOOK done"
+        "stage=HOOK done",
       );
+    }
+
+    if (env.ENABLE_HOOK_AB_TESTING && hookVariantsForExperiment.length > 1) {
+      const persistedTopic = await prisma.topic.findUnique({
+        where: { runId },
+        select: { titleEmbedding: true },
+      });
+      const childRunIds = await maybeSeedHookVariantRuns({
+        parentRunId: runId,
+        niche: run.niche,
+        targetDurationSec: run.targetDurationSec,
+        topic,
+        topicEmbedding: persistedTopic?.titleEmbedding ?? [],
+        scriptBody: script.body,
+        scriptCta: script.cta,
+        scriptWordCount: script.word_count,
+        scriptDurationEstimateSec: script.duration_estimate_sec,
+        variants: hookVariantsForExperiment,
+        chosenIndex: chosenHookIndex,
+      });
+      if (childRunIds.length > 0) {
+        log.info(
+          { childRunIds, variants: hookVariantsForExperiment.length },
+          "hook A/B variants seeded",
+        );
+      }
     }
 
     // ============================================================
@@ -413,8 +601,8 @@ export async function runPipeline(runId: string): Promise<void> {
             runAgent<typeof predictionInput, PredictionOutput>(
               "prediction",
               predictionInput,
-              { runId }
-            )
+              { runId },
+            ),
         );
         await prisma.performancePrediction.upsert({
           where: { runId },
@@ -439,7 +627,7 @@ export async function runPipeline(runId: string): Promise<void> {
             retention: prediction.predicted_retention,
             stageMs: Date.now() - stageP0,
           },
-          "stage=PREDICTION done"
+          "stage=PREDICTION done",
         );
       } catch (err) {
         // Prediction is advisory, not gate-blocking. Default to neutral score so
@@ -447,7 +635,7 @@ export async function runPipeline(runId: string): Promise<void> {
         // NOTE: not persisted so retries can try again.
         log.error(
           { err, stageMs: Date.now() - stageP0 },
-          "stage=PREDICTION failed — using neutral default score=5"
+          "stage=PREDICTION failed — using neutral default score=5",
         );
         prediction = {
           predicted_ctr: 3,
@@ -479,7 +667,7 @@ export async function runPipeline(runId: string): Promise<void> {
       const voiceTier = voiceTierFromScore(prediction.score);
       log.info(
         { score: prediction.score, tier: voiceTier },
-        "voice tier selected from prediction"
+        "voice tier selected from prediction",
       );
       const voiceInput = {
         text: narration,
@@ -487,7 +675,9 @@ export async function runPipeline(runId: string): Promise<void> {
         tier: voiceTier,
       };
       voice = await withAgentLog(runId, "voice", voiceInput, () =>
-        runAgent<typeof voiceInput, VoiceOutput>("voice", voiceInput, { runId })
+        runAgent<typeof voiceInput, VoiceOutput>("voice", voiceInput, {
+          runId,
+        }),
       );
       await prisma.voiceAsset.create({
         data: {
@@ -499,7 +689,7 @@ export async function runPipeline(runId: string): Promise<void> {
       });
       log.info(
         { durationSec: voice.duration_sec, stageMs: Date.now() - stageV0 },
-        "stage=VOICE done"
+        "stage=VOICE done",
       );
     }
 
@@ -524,7 +714,9 @@ export async function runPipeline(runId: string): Promise<void> {
         target_scene_sec: targetSceneSec,
       };
       ts = await withAgentLog(runId, "timestamp", tsInput, () =>
-        runAgent<typeof tsInput, TimestampOutput>("timestamp", tsInput, { runId })
+        runAgent<typeof tsInput, TimestampOutput>("timestamp", tsInput, {
+          runId,
+        }),
       );
       log.info(
         {
@@ -533,7 +725,7 @@ export async function runPipeline(runId: string): Promise<void> {
           total: ts.total_duration_sec,
           stageMs: Date.now() - stageA0,
         },
-        "stage=TIMESTAMP done"
+        "stage=TIMESTAMP done",
       );
     }
 
@@ -559,8 +751,8 @@ export async function runPipeline(runId: string): Promise<void> {
         runAgent<typeof vsInput, VideoSelectionOutput>(
           "video_selection",
           vsInput,
-          { runId }
-        )
+          { runId },
+        ),
       );
 
       await prisma.scene.createMany({
@@ -582,7 +774,7 @@ export async function runPipeline(runId: string): Promise<void> {
           hits: vs.scenes.filter((s) => s.clip_url).length,
           stageMs: Date.now() - stageX0,
         },
-        "stage=VIDEO_SELECTION done"
+        "stage=VIDEO_SELECTION done",
       );
     }
 
@@ -631,7 +823,7 @@ export async function runPipeline(runId: string): Promise<void> {
           } else {
             try {
               await downloadLimit(() =>
-                downloadClip(scene.clip_url as string, srcPath)
+                downloadClip(scene.clip_url as string, srcPath),
               );
               sourcePath = srcPath;
               await prisma.scene.update({
@@ -641,7 +833,7 @@ export async function runPipeline(runId: string): Promise<void> {
             } catch (err) {
               log.error(
                 { err, scene: scene.index },
-                "clip download failed — using placeholder"
+                "clip download failed — using placeholder",
               );
             }
           }
@@ -659,7 +851,7 @@ export async function runPipeline(runId: string): Promise<void> {
             width: TARGET_WIDTH,
             height: TARGET_HEIGHT,
             sourceDurationSec: scene.clip_duration_sec ?? undefined,
-          })
+          }),
         );
         return outPath;
       }
@@ -677,8 +869,8 @@ export async function runPipeline(runId: string): Promise<void> {
             runAgent<typeof metaInput, VideoMetaOutput>(
               "video_meta",
               metaInput,
-              { runId }
-            )
+              { runId },
+            ),
           );
 
       const [meta, sceneClipPaths] = await Promise.all([
@@ -690,7 +882,7 @@ export async function runPipeline(runId: string): Promise<void> {
           scenes: sceneClipPaths.length,
           metaCached: !!cachedMeta,
         },
-        "scene pipeline + meta ready"
+        "scene pipeline + meta ready",
       );
 
       // Subtitles regenerate cheaply — just rewrite the SRT.
@@ -734,7 +926,7 @@ export async function runPipeline(runId: string): Promise<void> {
       });
       log.info(
         { videoPath, stageMs: Date.now() - stageR0 },
-        "stage=VIDEO done"
+        "stage=VIDEO done",
       );
     }
 
@@ -763,7 +955,7 @@ export async function runPipeline(runId: string): Promise<void> {
         const tier = thumbnailTierFromScore(prediction.score);
         log.info(
           { score: prediction.score, tier: tier.quality, size: tier.size },
-          "thumbnail tier selected from prediction"
+          "thumbnail tier selected from prediction",
         );
         const thumbInput = {
           topic_title: topic.title,
@@ -778,8 +970,8 @@ export async function runPipeline(runId: string): Promise<void> {
             runAgent<typeof thumbInput, ThumbnailOutput>(
               "thumbnail",
               thumbInput,
-              { runId }
-            )
+              { runId },
+            ),
           );
           await prisma.video.update({
             where: { runId },
@@ -787,12 +979,12 @@ export async function runPipeline(runId: string): Promise<void> {
           });
           log.info(
             { thumbPath: thumb.image_path, stageMs: Date.now() - stageT8 },
-            "stage=THUMBNAIL done"
+            "stage=THUMBNAIL done",
           );
         } catch (err) {
           log.error(
             { err, stageMs: Date.now() - stageT8 },
-            "stage=THUMBNAIL failed — continuing without thumbnail"
+            "stage=THUMBNAIL failed — continuing without thumbnail",
           );
         }
       }
@@ -803,12 +995,21 @@ export async function runPipeline(runId: string): Promise<void> {
       data: { stage: "DONE", status: "COMPLETED", currentAgent: null },
     });
     publishRunEvent(runId, "stage", { stage: "DONE", status: "COMPLETED" });
+
+    if (env.ENABLE_HOOK_AB_TESTING && env.HOOK_AB_AUTO_UPLOAD) {
+      try {
+        await enqueueAutoUploadForRun(runId, env.HOOK_AB_UPLOAD_PRIVACY);
+      } catch (err) {
+        log.error({ err }, "auto-upload enqueue failed");
+      }
+    }
+
     log.info({ totalMs: Date.now() - pipelineStart }, "pipeline complete");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(
       { err: message, totalMs: Date.now() - pipelineStart },
-      "pipeline failed"
+      "pipeline failed",
     );
     await prisma.pipelineRun.update({
       where: { id: runId },
