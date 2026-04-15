@@ -41,7 +41,7 @@ function tagFromPerformance(p: number): string {
 // units, update these constants too.
 function normalizePerformance(
   ctr: number | null,
-  avgViewPercentage: number | null
+  avgViewPercentage: number | null,
 ): number {
   // 10% CTR ceilings out the ctr component; 100% avp ceilings out the avp one.
   const ctrScore = ctr == null ? 0 : Math.min(1, ctr / 10);
@@ -79,7 +79,7 @@ export type DuplicateHit = {
 export async function findDuplicateTopic(
   title: string,
   angle: string,
-  excludeRunId: string
+  excludeRunId: string,
 ): Promise<DuplicateHit | null> {
   const past = await prisma.topic.findMany({
     where: {
@@ -122,7 +122,7 @@ export async function findDuplicateTopic(
   if (best) {
     log.info(
       { title, match: best.title, sim: best.similarity.toFixed(3) },
-      "duplicate topic detected"
+      "duplicate topic detected",
     );
   }
   return best;
@@ -135,7 +135,7 @@ export async function findDuplicateTopic(
  */
 export async function embedTopicForDedup(
   title: string,
-  angle: string
+  angle: string,
 ): Promise<number[]> {
   try {
     return await computeEmbedding(`${title}. ${angle}`);
@@ -160,7 +160,7 @@ export type PastTopic = {
 
 export async function retrievePastTopics(
   niche: string,
-  limit = 3
+  limit = 3,
 ): Promise<PastTopic[]> {
   const all = await prisma.topicMemory.findMany({
     take: 500,
@@ -183,13 +183,13 @@ export async function retrievePastTopics(
     .map((m) => ({ m, sim: cosine(queryVec, m.embedding) }))
     .filter((r) => r.sim > SIMILARITY_FLOOR)
     .sort((a, b) =>
-      b.sim === a.sim ? b.m.performance - a.m.performance : b.sim - a.sim
+      b.sim === a.sim ? b.m.performance - a.m.performance : b.sim - a.sim,
     )
     .slice(0, limit);
 
   log.info(
     { niche, candidates: all.length, returned: scored.length },
-    "topic memory retrieval"
+    "topic memory retrieval",
   );
 
   return scored.map(({ m }) => ({
@@ -215,7 +215,7 @@ export type MemoryAdmissionInput = {
 };
 
 export async function maybeAdmitToMemory(
-  input: MemoryAdmissionInput
+  input: MemoryAdmissionInput,
 ): Promise<boolean> {
   const { views, ctr, avgViewPercentage } = input.metrics;
   if (
@@ -226,7 +226,7 @@ export async function maybeAdmitToMemory(
   ) {
     log.info(
       { runId: input.runId, views, ctr },
-      "topic memory admission rejected"
+      "topic memory admission rejected",
     );
     return false;
   }
@@ -265,7 +265,7 @@ export async function maybeAdmitToMemory(
 
   log.info(
     { runId: input.runId, performance: performance.toFixed(3) },
-    "admitted to TopicMemory"
+    "admitted to TopicMemory",
   );
   return true;
 }
@@ -291,7 +291,7 @@ export type PastHook = {
 export async function retrievePastHooks(
   topicTitle: string,
   topicAngle: string,
-  limit = 3
+  limit = 3,
 ): Promise<PastHook[]> {
   const all = await prisma.hookMemory.findMany({
     take: 500,
@@ -314,13 +314,13 @@ export async function retrievePastHooks(
     .map((m) => ({ m, sim: cosine(queryVec, m.embedding) }))
     .filter((r) => r.sim > SIMILARITY_FLOOR)
     .sort((a, b) =>
-      b.sim === a.sim ? b.m.performance - a.m.performance : b.sim - a.sim
+      b.sim === a.sim ? b.m.performance - a.m.performance : b.sim - a.sim,
     )
     .slice(0, limit);
 
   log.info(
     { topicTitle, candidates: all.length, returned: scored.length },
-    "hook memory retrieval"
+    "hook memory retrieval",
   );
 
   return scored.map(({ m }) => ({
@@ -338,6 +338,8 @@ export type HookAdmissionInput = {
   topicTitle: string;
   topicAngle: string;
   hookText: string;
+  forceAdmission?: boolean;
+  replayRate?: number | null;
   metrics: {
     views: number | null;
     ctr: number | null;
@@ -346,26 +348,35 @@ export type HookAdmissionInput = {
 };
 
 export async function maybeAdmitHookToMemory(
-  input: HookAdmissionInput
+  input: HookAdmissionInput,
 ): Promise<boolean> {
   const { views, ctr, avgViewPercentage } = input.metrics;
+  const forceAdmission = input.forceAdmission === true;
   if (
-    views == null ||
-    views < ADMISSION_VIEWS_MIN ||
-    ctr == null ||
-    ctr < ADMISSION_CTR_MIN
+    !forceAdmission &&
+    (views == null ||
+      views < ADMISSION_VIEWS_MIN ||
+      ctr == null ||
+      ctr < ADMISSION_CTR_MIN)
   ) {
     log.info(
       { runId: input.runId, views, ctr },
-      "hook memory admission rejected"
+      "hook memory admission rejected",
     );
     return false;
   }
 
-  const performance = normalizePerformance(ctr, avgViewPercentage);
+  let performance = normalizePerformance(ctr, avgViewPercentage);
+  if (input.replayRate != null && input.replayRate > 0) {
+    performance += Math.min(1, input.replayRate) * 0.2;
+  }
+  performance = Math.min(1.5, performance);
+
   let embedding: number[];
   try {
-    embedding = await computeEmbedding(`${input.topicTitle}. ${input.topicAngle}`);
+    embedding = await computeEmbedding(
+      `${input.topicTitle}. ${input.topicAngle}`,
+    );
   } catch (err) {
     log.error({ err, runId: input.runId }, "hook embedding failed");
     return false;
@@ -395,8 +406,13 @@ export async function maybeAdmitHookToMemory(
   });
 
   log.info(
-    { runId: input.runId, performance: performance.toFixed(3) },
-    "admitted to HookMemory"
+    {
+      runId: input.runId,
+      performance: performance.toFixed(3),
+      forceAdmission,
+      replayRate: input.replayRate,
+    },
+    "admitted to HookMemory",
   );
   return true;
 }

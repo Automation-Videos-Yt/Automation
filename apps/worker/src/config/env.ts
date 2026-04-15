@@ -2,7 +2,9 @@ import { z } from "zod";
 import "dotenv/config";
 
 const schema = z.object({
-  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  NODE_ENV: z
+    .enum(["development", "production", "test"])
+    .default("development"),
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   AI_SERVICE_URL: z.string().url(),
@@ -20,6 +22,24 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Hook A/B testing:
+  // - true: one topic spawns multiple hook-variant runs (3-5 videos)
+  // - false: legacy single-hook path
+  ENABLE_HOOK_AB_TESTING: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Number of hook variants/videos to test per topic.
+  HOOK_AB_VARIANTS: z.coerce.number().int().min(3).max(5).default(3),
+  // Automatically enqueue upload for each completed A/B run variant.
+  HOOK_AB_AUTO_UPLOAD: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Privacy used by auto-uploaded A/B variants.
+  HOOK_AB_UPLOAD_PRIVACY: z
+    .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
+    .default("PRIVATE"),
   // Cron schedule for auto-sync of YouTube analytics. Default: every 6 hours.
   // Set to "" to disable the scheduler entirely.
   ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),
