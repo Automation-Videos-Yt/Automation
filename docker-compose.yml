@@ -58,6 +58,85 @@ services:
       REDIS_URL: redis://redis:6379
       AI_SERVICE_URL: http://ai:8000
       STORAGE_PATH: /storage
+      WORKER_ROLE: all
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  # Optional split workers. Start them with:
+  # docker compose --profile split-workers up -d worker-video worker-upload worker-enrichment
+  # (and stop the default `worker` service when using split mode)
+  worker-video:
+    profiles: ["split-workers"]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: video
+      ENABLE_ANALYTICS_CRON: "false"
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  worker-upload:
+    profiles: ["split-workers"]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: upload
+      ENABLE_ANALYTICS_CRON: "false"
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  worker-enrichment:
+    profiles: ["split-workers"]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/youtube_automation?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: enrichment
+      ENABLE_ANALYTICS_CRON: "true"
     volumes:
       - ./storage:/storage
     depends_on:

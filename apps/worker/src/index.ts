@@ -16,99 +16,162 @@ const connection = new IORedis(env.REDIS_URL, {
 connection.on("error", (err) => log.error({ err }, "redis error"));
 connection.on("connect", () => log.info("redis connected"));
 
+const role = env.WORKER_ROLE;
+const workers: Worker[] = [];
+
+const shouldRunVideo = role === "all" || role === "video";
+const shouldRunUpload = role === "all" || role === "upload";
+const shouldRunEnrichment = role === "all" || role === "enrichment";
+
 // ------------------------------------------------------------
 // Video-generation pipeline worker
 // ------------------------------------------------------------
-const videoWorker = new Worker<{ runId: string }>(
-  "videoQueue",
-  async (job) => {
-    const jobLog = scoped("worker", job.data.runId);
-    jobLog.info({ jobId: job.id }, "video job picked up");
-    const started = Date.now();
-    try {
-      await runPipeline(job.data.runId);
-      jobLog.info({ jobId: job.id, durationMs: Date.now() - started }, "video job completed");
-    } catch (err) {
-      jobLog.error({ err, jobId: job.id, durationMs: Date.now() - started }, "video job threw");
-      throw err;
-    }
-  },
-  { connection, concurrency: env.WORKER_CONCURRENCY }
-);
+if (shouldRunVideo) {
+  const videoWorker = new Worker<{ runId: string }>(
+    "videoQueue",
+    async (job) => {
+      const jobLog = scoped("worker", job.data.runId);
+      jobLog.info({ jobId: job.id }, "video job picked up");
+      const started = Date.now();
+      try {
+        await runPipeline(job.data.runId);
+        jobLog.info(
+          { jobId: job.id, durationMs: Date.now() - started },
+          "video job completed",
+        );
+      } catch (err) {
+        jobLog.error(
+          { err, jobId: job.id, durationMs: Date.now() - started },
+          "video job threw",
+        );
+        throw err;
+      }
+    },
+    { connection, concurrency: env.WORKER_CONCURRENCY },
+  );
 
-videoWorker.on("ready", () => log.info({ concurrency: env.WORKER_CONCURRENCY }, "videoQueue ready"));
-videoWorker.on("failed", (job, err) =>
-  log.error({ jobId: job?.id, runId: job?.data?.runId, err: err.message }, "video job failed event")
-);
-videoWorker.on("error", (err) => log.error({ err }, "video worker error"));
+  videoWorker.on("ready", () =>
+    log.info({ role, concurrency: env.WORKER_CONCURRENCY }, "videoQueue ready"),
+  );
+  videoWorker.on("failed", (job, err) =>
+    log.error(
+      { jobId: job?.id, runId: job?.data?.runId, err: err.message },
+      "video job failed event",
+    ),
+  );
+  videoWorker.on("error", (err) => log.error({ err }, "video worker error"));
+  workers.push(videoWorker);
+}
 
 // ------------------------------------------------------------
 // YouTube upload worker
 // ------------------------------------------------------------
-const uploadWorker = new Worker<{ runId: string; uploadId: string }>(
-  "uploadQueue",
-  async (job) => {
-    const jobLog = scoped("upload-worker", job.data.runId);
-    jobLog.info({ jobId: job.id, uploadId: job.data.uploadId }, "upload job picked up");
-    const started = Date.now();
-    try {
-      await runUpload(job.data.uploadId);
-      jobLog.info({ jobId: job.id, durationMs: Date.now() - started }, "upload job completed");
-    } catch (err) {
-      jobLog.error({ err, jobId: job.id, durationMs: Date.now() - started }, "upload job threw");
-      throw err;
-    }
-  },
-  { connection, concurrency: 1 }
-);
+if (shouldRunUpload) {
+  const uploadWorker = new Worker<{ runId: string; uploadId: string }>(
+    "uploadQueue",
+    async (job) => {
+      const jobLog = scoped("upload-worker", job.data.runId);
+      jobLog.info(
+        { jobId: job.id, uploadId: job.data.uploadId },
+        "upload job picked up",
+      );
+      const started = Date.now();
+      try {
+        await runUpload(job.data.uploadId);
+        jobLog.info(
+          { jobId: job.id, durationMs: Date.now() - started },
+          "upload job completed",
+        );
+      } catch (err) {
+        jobLog.error(
+          { err, jobId: job.id, durationMs: Date.now() - started },
+          "upload job threw",
+        );
+        throw err;
+      }
+    },
+    { connection, concurrency: env.UPLOAD_WORKER_CONCURRENCY },
+  );
 
-uploadWorker.on("ready", () => log.info("uploadQueue ready"));
-uploadWorker.on("failed", (job, err) =>
-  log.error({ jobId: job?.id, err: err.message }, "upload job failed event")
-);
-uploadWorker.on("error", (err) => log.error({ err }, "upload worker error"));
+  uploadWorker.on("ready", () =>
+    log.info(
+      { role, concurrency: env.UPLOAD_WORKER_CONCURRENCY },
+      "uploadQueue ready",
+    ),
+  );
+  uploadWorker.on("failed", (job, err) =>
+    log.error({ jobId: job?.id, err: err.message }, "upload job failed event"),
+  );
+  uploadWorker.on("error", (err) => log.error({ err }, "upload worker error"));
+  workers.push(uploadWorker);
+}
 
 // ------------------------------------------------------------
 // Enrichment worker (analytics → feedback → memory)
 // ------------------------------------------------------------
-const enrichmentWorker = new Worker<{ runId: string }>(
-  "enrichmentQueue",
-  async (job) => {
-    const jobLog = scoped("enrich-worker", job.data.runId);
-    jobLog.info({ jobId: job.id }, "enrichment job picked up");
-    const started = Date.now();
-    try {
-      await runEnrichment(job.data.runId);
-      jobLog.info({ jobId: job.id, durationMs: Date.now() - started }, "enrichment job completed");
-    } catch (err) {
-      jobLog.error({ err, jobId: job.id, durationMs: Date.now() - started }, "enrichment job threw");
-      throw err;
-    }
-  },
-  { connection, concurrency: 2 }
-);
+if (shouldRunEnrichment) {
+  const enrichmentWorker = new Worker<{ runId: string }>(
+    "enrichmentQueue",
+    async (job) => {
+      const jobLog = scoped("enrich-worker", job.data.runId);
+      jobLog.info({ jobId: job.id }, "enrichment job picked up");
+      const started = Date.now();
+      try {
+        await runEnrichment(job.data.runId);
+        jobLog.info(
+          { jobId: job.id, durationMs: Date.now() - started },
+          "enrichment job completed",
+        );
+      } catch (err) {
+        jobLog.error(
+          { err, jobId: job.id, durationMs: Date.now() - started },
+          "enrichment job threw",
+        );
+        throw err;
+      }
+    },
+    { connection, concurrency: env.ENRICHMENT_WORKER_CONCURRENCY },
+  );
 
-enrichmentWorker.on("ready", () => log.info("enrichmentQueue ready"));
+  enrichmentWorker.on("ready", () =>
+    log.info(
+      { role, concurrency: env.ENRICHMENT_WORKER_CONCURRENCY },
+      "enrichmentQueue ready",
+    ),
+  );
+  enrichmentWorker.on("failed", (job, err) =>
+    log.error(
+      { jobId: job?.id, err: err.message },
+      "enrichment job failed event",
+    ),
+  );
+  enrichmentWorker.on("error", (err) =>
+    log.error({ err }, "enrichment worker error"),
+  );
+  workers.push(enrichmentWorker);
+}
 
 // ------------------------------------------------------------
 // Scheduled jobs
 // ------------------------------------------------------------
-startAnalyticsSyncCron();
-enrichmentWorker.on("failed", (job, err) =>
-  log.error({ jobId: job?.id, err: err.message }, "enrichment job failed event")
-);
-enrichmentWorker.on("error", (err) => log.error({ err }, "enrichment worker error"));
+if ((role === "all" || role === "enrichment") && env.ENABLE_ANALYTICS_CRON) {
+  startAnalyticsSyncCron();
+  log.info({ role }, "analytics scheduler started");
+} else {
+  log.info({ role }, "analytics scheduler disabled for this worker role");
+}
+
+if (workers.length === 0) {
+  log.fatal({ role }, "no worker consumers started for configured role");
+  process.exit(1);
+}
 
 // ------------------------------------------------------------
 // Shutdown
 // ------------------------------------------------------------
 const shutdown = async (signal: string) => {
   log.info({ signal }, "shutting down");
-  await Promise.all([
-    videoWorker.close(),
-    uploadWorker.close(),
-    enrichmentWorker.close(),
-  ]);
+  await Promise.all(workers.map((worker) => worker.close()));
   await connection.quit();
   process.exit(0);
 };

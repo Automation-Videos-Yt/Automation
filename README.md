@@ -47,19 +47,33 @@ open http://localhost:3000
 5. Per-run analytics: **Sync now** on the run page (or let the cron handle it) → metrics, AI feedback, memory admission.
 6. Future runs auto-retrieve similar past topics + hooks and bias toward what performed.
 
+### Run split workers (optional)
+
+By default, one `worker` process consumes all queues. For better throughput and tighter control, run dedicated worker roles:
+
+```bash
+# start only dedicated split workers
+docker compose --profile split-workers up -d worker-video worker-upload worker-enrichment
+
+# scale heavy video workers independently
+docker compose --profile split-workers up -d --scale worker-video=2 worker-video worker-upload worker-enrichment
+```
+
+Worker roles are selected via `WORKER_ROLE=all|video|upload|enrichment`.
+
 ## Pipeline stages
 
-| Stage | Agent | Cache source | Notes |
-|---|---|---|---|
-| `TOPIC` | topic (memory + dedup) | `Topic` row | top-3 `TopicMemory` as `past_topics`; retries up to 3× with `exclude_titles` if generated title cosine-matches a past `Topic.titleEmbedding` above 0.85 |
-| `SCRIPT` | script | `Script` row | model fallback `gpt-4o → gpt-4o-mini`; duration-aware (10–180s) |
-| `HOOK` | hook (memory) | `HookVariant[]` rows | top-3 `HookMemory` as `past_hooks` + N variants, self-ranked |
-| `PREDICTION` | prediction | `PerformancePrediction` row | drives voice + thumbnail tiering; neutral default on failure |
-| `VOICE` | voice | `VoiceAsset` + mp3 file | tier: `premium` (tts-1-hd), `economy` (tts-1), or `elite` (ElevenLabs, opt-in) |
-| `TIMESTAMP` | timestamp | last SUCCESS `AgentLog` | Whisper word-level alignment |
-| `VIDEO_SELECTION` | video_selection | `Scene[]` rows | LLM queries → Pexels portrait clips |
-| `VIDEO` | video_meta + worker | file checks on every clip + final mp4 | autocomplete SEO + concurrent render |
-| `THUMBNAIL` | thumbnail | png file on disk | **off by default** (see flag below) |
+| Stage             | Agent                  | Cache source                          | Notes                                                                                                                                                   |
+| ----------------- | ---------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TOPIC`           | topic (memory + dedup) | `Topic` row                           | top-3 `TopicMemory` as `past_topics`; retries up to 3× with `exclude_titles` if generated title cosine-matches a past `Topic.titleEmbedding` above 0.85 |
+| `SCRIPT`          | script                 | `Script` row                          | model fallback `gpt-4o → gpt-4o-mini`; duration-aware (10–180s)                                                                                         |
+| `HOOK`            | hook (memory)          | `HookVariant[]` rows                  | top-3 `HookMemory` as `past_hooks` + N variants, self-ranked                                                                                            |
+| `PREDICTION`      | prediction             | `PerformancePrediction` row           | drives voice + thumbnail tiering; neutral default on failure                                                                                            |
+| `VOICE`           | voice                  | `VoiceAsset` + mp3 file               | tier: `premium` (tts-1-hd), `economy` (tts-1), or `elite` (ElevenLabs, opt-in)                                                                          |
+| `TIMESTAMP`       | timestamp              | last SUCCESS `AgentLog`               | Whisper word-level alignment                                                                                                                            |
+| `VIDEO_SELECTION` | video_selection        | `Scene[]` rows                        | LLM queries → Pexels portrait clips                                                                                                                     |
+| `VIDEO`           | video_meta + worker    | file checks on every clip + final mp4 | autocomplete SEO + concurrent render                                                                                                                    |
+| `THUMBNAIL`       | thumbnail              | png file on disk                      | **off by default** (see flag below)                                                                                                                     |
 
 Short videos (`target_duration_sec < 30`) automatically use 4s scene chunks instead of 7.5s so the cut cadence stays lively.
 
@@ -67,11 +81,11 @@ Short videos (`target_duration_sec < 30`) automatically use 4s scene chunks inst
 
 Tier driven by `prediction.score` (0–10):
 
-| Tier | Voice | Thumbnail (when enabled) | Video + metadata | **Total** |
-|---|---|---|---|---|
-| **Strong** (≥ 7.5) | tts-1-hd ~$0.033 | 1536×1024 medium ~$0.07 | ~$0.02 | **~$0.13** |
-| Mid (5 – 7.5) | tts-1 ~$0.015 | 1024×1024 medium ~$0.04 | ~$0.02 | **~$0.075** |
-| Weak (< 5) | tts-1 ~$0.015 | 1024×1024 low ~$0.02 | ~$0.02 | **~$0.055** |
+| Tier               | Voice            | Thumbnail (when enabled) | Video + metadata | **Total**   |
+| ------------------ | ---------------- | ------------------------ | ---------------- | ----------- |
+| **Strong** (≥ 7.5) | tts-1-hd ~$0.033 | 1536×1024 medium ~$0.07  | ~$0.02           | **~$0.13**  |
+| Mid (5 – 7.5)      | tts-1 ~$0.015    | 1024×1024 medium ~$0.04  | ~$0.02           | **~$0.075** |
+| Weak (< 5)         | tts-1 ~$0.015    | 1024×1024 low ~$0.02     | ~$0.02           | **~$0.055** |
 
 With thumbnails off (default): **~$0.06 strong / ~$0.04 mid / ~$0.035 weak** per run.
 
@@ -110,6 +124,7 @@ This naturally spreads batch runs (`×5`, `×10`) apart: each new run sees the j
 ## Live events (SSE)
 
 Worker publishes to Redis `pipeline:events` on:
+
 - every stage transition (via `advanceStage()` helper)
 - pipeline DONE / FAILED
 - upload RUNNING / COMPLETED / FAILED
@@ -122,13 +137,14 @@ API runs one Redis subscriber, fans into an in-process EventEmitter, and exposes
 Every stage output is persisted (DB row and/or file on disk). On any failure, run stays `FAILED` with a red **Retry from last success** button. Clicking it re-enters the pipeline; cached stages log `stage=X skipped (cached)` and only the broken step plus anything downstream re-runs.
 
 Saves:
+
 - Pexels downloads (per-scene file check)
 - FFmpeg per-scene prep + final concat
 - Whisper transcription
 - LLM calls (Topic, Script, Hook, Prediction, Video Meta, Thumbnail prompt)
 - ElevenLabs / OpenAI TTS
 
-Prediction failures deliberately stay *uncached* so a retry can try again.
+Prediction failures deliberately stay _uncached_ so a retry can try again.
 
 ## Cron auto-sync
 
@@ -162,12 +178,16 @@ The OAuth helper + `parseAnalyticsCell` are shared (one copy per app in `integra
 
 ## Feature flags (`.env`)
 
-| Flag | Default | Effect |
-|---|---|---|
-| `ENABLE_THUMBNAIL_AGENT` | `false` | Run the THUMBNAIL stage. Default off because YouTube rejects custom thumbnails from unverified channels. Verify at [youtube.com/verify](https://youtube.com/verify), then flip to `true`. |
-| `ANALYTICS_SYNC_CRON` | `0 */6 * * *` | node-cron expression for auto-enrichment. Empty string disables. |
-| `LOG_LEVEL` | `info` | `debug` exposes BullMQ events + aiClient input summaries + cache HIT lines. |
-| `WORKER_CONCURRENCY` | `1` | Parallel pipeline runs per worker. Watch FFmpeg CPU if you bump it. |
+| Flag                            | Default       | Effect                                                                                                                                                                                    |
+| ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENABLE_THUMBNAIL_AGENT`        | `false`       | Run the THUMBNAIL stage. Default off because YouTube rejects custom thumbnails from unverified channels. Verify at [youtube.com/verify](https://youtube.com/verify), then flip to `true`. |
+| `WORKER_ROLE`                   | `all`         | Worker role selector: `all`, `video`, `upload`, `enrichment`. Use dedicated roles when splitting workers.                                                                                 |
+| `ANALYTICS_SYNC_CRON`           | `0 */6 * * *` | node-cron expression for auto-enrichment. Empty string disables.                                                                                                                          |
+| `ENABLE_ANALYTICS_CRON`         | `true`        | Enables cron scheduler in this worker process. Set `false` on non-enrichment roles.                                                                                                       |
+| `LOG_LEVEL`                     | `info`        | `debug` exposes BullMQ events + aiClient input summaries + cache HIT lines.                                                                                                               |
+| `WORKER_CONCURRENCY`            | `1`           | Parallel pipeline runs per worker. Watch FFmpeg CPU if you bump it.                                                                                                                       |
+| `UPLOAD_WORKER_CONCURRENCY`     | `1`           | Parallel uploads per upload-role worker. Increase carefully to avoid API quota spikes.                                                                                                    |
+| `ENRICHMENT_WORKER_CONCURRENCY` | `2`           | Parallel enrichment jobs per enrichment-role worker.                                                                                                                                      |
 
 ## YouTube prereqs
 
@@ -200,26 +220,26 @@ YouTubeAccount   (singleton id="default": accessToken, refreshToken, channelId)
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/pipeline/run` | start a single run (body: `{ niche, durationSec? }`) |
-| `POST` | `/pipeline/batch` | start N runs (body: `{ niche, count (2-10), durationSec? }`) |
-| `GET` | `/pipeline` | list recent runs |
-| `GET` | `/pipeline/:id` | full run detail + cost breakdown |
-| `GET` | `/pipeline/:id/logs` | per-stage agent logs |
-| `GET` | `/pipeline/:id/stream` | **SSE** — live events for this run |
-| `POST` | `/pipeline/:id/retry` | resume FAILED run from last success |
-| `POST` | `/pipeline/:id/upload` | upload completed video to YouTube |
-| `GET` | `/pipeline/:id/upload` | upload status |
-| `POST` | `/pipeline/:id/analytics/sync` | queue analytics refresh for this run |
-| `GET` | `/pipeline/:id/analytics` | latest snapshot + history + feedback |
-| `POST` | `/analytics/sync` | queue refresh for all uploads |
-| `GET` | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data |
-| `GET` | `/auth/youtube` | start OAuth flow |
-| `GET` | `/auth/youtube/callback` | OAuth return URL |
-| `GET` | `/auth/youtube/status` | connected? channel info |
-| `POST` | `/auth/youtube/disconnect` | drop stored tokens |
-| `GET` | `/media/*` | static-serve generated audio / video / thumbnail / subs |
+| Method | Path                                     | Purpose                                                      |
+| ------ | ---------------------------------------- | ------------------------------------------------------------ |
+| `POST` | `/pipeline/run`                          | start a single run (body: `{ niche, durationSec? }`)         |
+| `POST` | `/pipeline/batch`                        | start N runs (body: `{ niche, count (2-10), durationSec? }`) |
+| `GET`  | `/pipeline`                              | list recent runs                                             |
+| `GET`  | `/pipeline/:id`                          | full run detail + cost breakdown                             |
+| `GET`  | `/pipeline/:id/logs`                     | per-stage agent logs                                         |
+| `GET`  | `/pipeline/:id/stream`                   | **SSE** — live events for this run                           |
+| `POST` | `/pipeline/:id/retry`                    | resume FAILED run from last success                          |
+| `POST` | `/pipeline/:id/upload`                   | upload completed video to YouTube                            |
+| `GET`  | `/pipeline/:id/upload`                   | upload status                                                |
+| `POST` | `/pipeline/:id/analytics/sync`           | queue analytics refresh for this run                         |
+| `GET`  | `/pipeline/:id/analytics`                | latest snapshot + history + feedback                         |
+| `POST` | `/analytics/sync`                        | queue refresh for all uploads                                |
+| `GET`  | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data                                 |
+| `GET`  | `/auth/youtube`                          | start OAuth flow                                             |
+| `GET`  | `/auth/youtube/callback`                 | OAuth return URL                                             |
+| `GET`  | `/auth/youtube/status`                   | connected? channel info                                      |
+| `POST` | `/auth/youtube/disconnect`               | drop stored tokens                                           |
+| `GET`  | `/media/*`                               | static-serve generated audio / video / thumbnail / subs      |
 
 ## Project layout
 
@@ -282,4 +302,4 @@ ai-system
 - Every Node ↔ Python call forwards `x-request-id` (runId prefix) so both sides' logs correlate.
 - The VIDEO stage runs up to 6 parallel Pexels downloads + 2 parallel FFmpeg preps — tune in `pipeline-runner.ts` if CPU-constrained.
 - `AnalyticsCard` and the channel dashboard display CTR in percent form. If you're querying `VideoAnalytics.ctr` directly in SQL for any custom analytics, note it's stored as percent (4.0 = 4%) too — consistent across the whole codebase.
-- Cron ticks enqueue per-run enrichment jobs with unique `jobId`s per tick, so double-scheduling from two workers won't duplicate work *within* a tick. For multi-worker scale-out, add a Redis SET-NX lock around the tick itself.
+- Cron ticks enqueue per-run enrichment jobs with unique `jobId`s per tick, so double-scheduling from two workers won't duplicate work _within_ a tick. For multi-worker scale-out, add a Redis SET-NX lock around the tick itself.

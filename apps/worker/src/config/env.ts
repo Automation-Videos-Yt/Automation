@@ -9,7 +9,12 @@ const schema = z.object({
   REDIS_URL: z.string().url(),
   AI_SERVICE_URL: z.string().url(),
   STORAGE_PATH: z.string().default("/storage"),
+  // all: start all queue consumers in one process (legacy/default)
+  // video/upload/enrichment: dedicated role-specific process.
+  WORKER_ROLE: z.enum(["all", "video", "upload", "enrichment"]).default("all"),
   WORKER_CONCURRENCY: z.coerce.number().default(1),
+  UPLOAD_WORKER_CONCURRENCY: z.coerce.number().default(1),
+  ENRICHMENT_WORKER_CONCURRENCY: z.coerce.number().default(2),
   YOUTUBE_CLIENT_ID: z.string().optional(),
   YOUTUBE_CLIENT_SECRET: z.string().optional(),
   YOUTUBE_REDIRECT_URI: z
@@ -43,6 +48,11 @@ const schema = z.object({
   // Cron schedule for auto-sync of YouTube analytics. Default: every 6 hours.
   // Set to "" to disable the scheduler entirely.
   ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),
+  // When false, this process never starts the analytics scheduler.
+  ENABLE_ANALYTICS_CRON: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 });
 
 const parsed = schema.safeParse(process.env);
