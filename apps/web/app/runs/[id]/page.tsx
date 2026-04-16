@@ -9,6 +9,7 @@ import { AnalyticsCard } from "../../../components/AnalyticsCard";
 import { FeedbackCard } from "../../../components/FeedbackCard";
 import { PredictionCard } from "../../../components/PredictionCard";
 import { AssetActions } from "../../../components/AssetActions";
+import { HookExperimentCard } from "../../../components/HookExperimentCard";
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: "English",
@@ -124,6 +125,7 @@ export default function RunDetailPage() {
   useRunEvents(id, (kind) => {
     qc.invalidateQueries({ queryKey: ["run", id] });
     qc.invalidateQueries({ queryKey: ["run-logs", id] });
+    qc.invalidateQueries({ queryKey: ["run-experiment", id] });
     if (kind === "upload" || kind === "analytics" || kind === "feedback") {
       qc.invalidateQueries({ queryKey: ["upload", id] });
       qc.invalidateQueries({ queryKey: ["run-analytics", id] });
@@ -141,6 +143,17 @@ export default function RunDetailPage() {
     queryKey: ["run-analytics", id],
     queryFn: () => api.getRunAnalytics(id),
     enabled: run?.upload?.status === "COMPLETED",
+  });
+
+  const { data: experiment } = useQuery({
+    queryKey: ["run-experiment", id],
+    queryFn: () => api.getExperiment(id),
+    enabled: !!run?.experimentId,
+    refetchInterval: (q) => {
+      const exp = q.state.data;
+      if (!exp) return 10_000;
+      return exp.canPickWinner ? 30_000 : 10_000;
+    },
   });
 
   if (!run) return <div>Loading...</div>;
@@ -228,6 +241,10 @@ export default function RunDetailPage() {
           prediction={run.prediction}
           actual={analyticsData?.latest ?? null}
         />
+      )}
+
+      {experiment && experiment.runs.length > 1 && (
+        <HookExperimentCard experiment={experiment} currentRunId={run.id} />
       )}
 
       {run.hookVariants && run.hookVariants.length > 0 && (

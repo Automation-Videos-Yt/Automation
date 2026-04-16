@@ -130,6 +130,7 @@ function voiceTierFromScore(score: number): "elite" | "premium" | "economy" {
 
 type SeedHookVariantRunsInput = {
   parentRunId: string;
+  experimentId: string;
   niche: string;
   languageCode: string;
   targetDurationSec: number;
@@ -190,6 +191,7 @@ async function maybeSeedHookVariantRuns(
       const childRun = await prisma.$transaction(async (tx) => {
         const child = await tx.pipelineRun.create({
           data: {
+            experimentId: input.experimentId,
             niche: input.niche,
             languageCode: input.languageCode,
             targetDurationSec: input.targetDurationSec,
@@ -323,6 +325,7 @@ export async function runPipeline(runId: string): Promise<void> {
     log.error("run not found in db");
     throw new Error(`run ${runId} not found`);
   }
+  const experimentId = run.experimentId ?? run.id;
 
   log.info(
     { niche: run.niche, languageCode: run.languageCode },
@@ -332,7 +335,7 @@ export async function runPipeline(runId: string): Promise<void> {
 
   await prisma.pipelineRun.update({
     where: { id: runId },
-    data: { status: "RUNNING", errorMessage: null },
+    data: { status: "RUNNING", errorMessage: null, experimentId },
   });
   publishRunEvent(runId, "stage", { stage: "QUEUED", status: "RUNNING" });
 
@@ -556,6 +559,7 @@ export async function runPipeline(runId: string): Promise<void> {
       });
       const childRunIds = await maybeSeedHookVariantRuns({
         parentRunId: runId,
+        experimentId,
         niche: run.niche,
         languageCode: run.languageCode,
         targetDurationSec: run.targetDurationSec,

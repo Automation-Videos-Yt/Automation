@@ -7,6 +7,7 @@ import {
   PipelineServiceError,
   createPipelineBatch,
   createPipelineRun,
+  getHookExperiment,
   getPipelineLogs,
   getPipelineRun,
   listPipelineRuns,
@@ -67,6 +68,23 @@ export async function getRunLogs(
   try {
     const logs = await getPipelineLogs(req.params.id);
     res.json(logs);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getRunExperiment(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const experiment = await getHookExperiment(req.params.id);
+    if (!experiment) {
+      res.status(404).json({ error: "Run not found" });
+      return;
+    }
+    res.json(experiment);
   } catch (err) {
     next(err);
   }

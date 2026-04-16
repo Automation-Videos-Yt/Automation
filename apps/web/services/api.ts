@@ -167,8 +167,31 @@ export type Scene = {
   clipDurationSec: number | null;
 };
 
+export type HookExperimentRun = {
+  runId: string;
+  hookText: string | null;
+  status: RunStatus;
+  stage: PipelineStage;
+  uploadStatus: UploadStatus | null;
+  videoUrl: string | null;
+  views: number | null;
+  avgViewPercentage: number | null;
+  watchTimeMinutes: number | null;
+  replayRate: number | null;
+  score: number | null;
+  isWinner: boolean;
+};
+
+export type HookExperimentResponse = {
+  experimentId: string;
+  canPickWinner: boolean;
+  winnerRunId: string | null;
+  runs: HookExperimentRun[];
+};
+
 export type PipelineRun = {
   id: string;
+  experimentId: string | null;
   niche: string;
   languageCode: string;
   targetDurationSec: number;
@@ -305,6 +328,12 @@ export const api = {
     return fetch(`${API_URL}/pipeline/${id}/logs`, { cache: "no-store" }).then<
       AgentLog[]
     >(handle);
+  },
+
+  getExperiment(id: string) {
+    return fetch(`${API_URL}/pipeline/${id}/experiment`, {
+      cache: "no-store",
+    }).then<HookExperimentResponse>(handle);
   },
 
   retryRun(id: string) {
