@@ -91,6 +91,8 @@ With thumbnails off (default): **~$0.06 strong / ~$0.04 mid / ~$0.035 weak** per
 
 The per-run estimate lives on the run header — hover for the voice / whisper / thumbnail / llm breakdown. Source: [apps/api/src/services/cost.service.ts](apps/api/src/services/cost.service.ts).
 
+When `ENABLE_LANGCHAIN_COST_ANALYSIS=true` and `OPENAI_API_KEY` is set, the API also attaches a lightweight AI optimization analysis (`cost.analysis`) generated via LangChain using `OPENAI_MODEL_COST_ANALYSIS`.
+
 `elite` tier (ElevenLabs) is wired in but not auto-selected — opt in via direct agent call when you want premium narration.
 
 ## Self-improving feedback loop

@@ -5,6 +5,7 @@ import { env } from "./config/env";
 import { pipelineRouter } from "./routes/pipeline";
 import { youtubeRouter } from "./routes/youtube";
 import { analyticsRouter } from "./routes/analytics";
+import { costRouter } from "./routes/cost";
 import { errorHandler } from "./middleware/error";
 import { logger } from "./lib/logger";
 
@@ -24,7 +25,7 @@ export function createApp() {
       customErrorMessage: (req, res, err) =>
         `${req.method} ${req.url} ${res.statusCode} ${err.message}`,
       customProps: () => ({ scope: "http" }),
-    })
+    }),
   );
 
   app.use(cors());
@@ -35,6 +36,7 @@ export function createApp() {
   app.use("/pipeline", pipelineRouter);
   app.use("/auth", youtubeRouter);
   app.use("/analytics", analyticsRouter);
+  app.use("/cost", costRouter);
 
   app.use("/media", express.static(env.STORAGE_PATH, { fallthrough: true }));
 
