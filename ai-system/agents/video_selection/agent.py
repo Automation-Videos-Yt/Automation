@@ -1,19 +1,11 @@
 import json
-from openai import OpenAI
 from config import settings
 from schemas import VideoSelectionInput, VideoSelectionOutput, SelectedClip
 from lib.log import get_logger, timed
+from lib.openai_client import get_openai_client
 from .pexels import PexelsError, search_clip
 
 log = get_logger("agent.video_selection")
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 QUERY_SYSTEM = """You generate stock-footage search queries.
@@ -59,7 +51,7 @@ def _query_schema(n: int) -> dict:
 def _generate_queries(
     payload: VideoSelectionInput,
 ) -> dict[int, str]:
-    client = _get_client()
+    client = get_openai_client()
     scene_lines = "\n".join(
         f"Scene {s.index} ({s.end - s.start:.1f}s): {s.text}" for s in payload.scenes
     )

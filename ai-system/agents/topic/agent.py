@@ -1,18 +1,10 @@
 import json
-from openai import OpenAI
 from config import settings
 from schemas import TopicInput, TopicOutput
 from lib.log import get_logger, timed
+from lib.openai_client import get_openai_client
 
 log = get_logger("agent.topic")
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 SYSTEM_PROMPT = """You are a YouTube short-form content strategist.
@@ -83,7 +75,7 @@ def _exclude_block(payload: TopicInput) -> str:
 
 def run(raw_input: dict) -> dict:
     payload = TopicInput.model_validate(raw_input)
-    client = _get_client()
+    client = get_openai_client()
     log.info(
         "niche=%s language=%s past=%d",
         payload.niche,

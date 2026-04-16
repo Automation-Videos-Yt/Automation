@@ -1,20 +1,12 @@
 import base64
 import json
 import os
-from openai import OpenAI
 from config import settings
 from schemas import ThumbnailInput, ThumbnailOutput
 from lib.log import get_logger, timed
+from lib.openai_client import get_openai_client
 
 log = get_logger("agent.thumbnail")
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 PROMPT_SYSTEM = """You design YouTube thumbnails.
@@ -46,7 +38,7 @@ PROMPT_RESPONSE_FORMAT = {
 
 
 def _craft_prompt(payload: ThumbnailInput) -> str:
-    client = _get_client()
+    client = get_openai_client()
     user = (
         f"Topic title: {payload.topic_title}\n"
         f"Angle: {payload.topic_angle}\n"
@@ -71,7 +63,7 @@ def _craft_prompt(payload: ThumbnailInput) -> str:
 
 def run(raw_input: dict) -> dict:
     payload = ThumbnailInput.model_validate(raw_input)
-    client = _get_client()
+    client = get_openai_client()
     log.info("topic=%r size=%s out=%s", payload.topic_title, payload.size, payload.output_path)
 
     prompt = _craft_prompt(payload)

@@ -1,17 +1,10 @@
 import time
-from openai import OpenAI, APIError, APITimeoutError, RateLimitError
+from openai import APIError, APITimeoutError, RateLimitError
 from config import settings
+from .openai_client import get_openai_client
 from .log import get_logger
 
 log = get_logger("llm")
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 def chat_with_fallback(
@@ -30,7 +23,7 @@ def chat_with_fallback(
 
     Non-retryable errors (400 bad requests, schema violations) propagate immediately.
     """
-    client = _get_client()
+    client = get_openai_client()
     kwargs = {"messages": messages, "temperature": temperature}
     if response_format:
         kwargs["response_format"] = response_format

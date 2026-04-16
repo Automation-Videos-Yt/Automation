@@ -1,14 +1,13 @@
 import os
 from elevenlabs.client import ElevenLabs
 from mutagen.mp3 import MP3
-from openai import OpenAI
 from config import settings
 from schemas import VoiceInput, VoiceOutput
 from lib.log import get_logger, timed
+from lib.openai_client import get_openai_client
 
 log = get_logger("agent.voice")
 _el: ElevenLabs | None = None
-_oa: OpenAI | None = None
 
 # Voice tiers:
 #   elite    → ElevenLabs turbo (best quality, ~$0.18/1k chars)
@@ -29,13 +28,6 @@ def _get_el() -> ElevenLabs:
     return _el
 
 
-def _get_oa() -> OpenAI:
-    global _oa
-    if _oa is None:
-        _oa = OpenAI(api_key=settings.openai_api_key)
-    return _oa
-
-
 def _elevenlabs_tts(text: str, voice_id: str, output_path: str) -> int:
     client = _get_el()
     audio_iter = client.text_to_speech.convert(
@@ -54,7 +46,7 @@ def _elevenlabs_tts(text: str, voice_id: str, output_path: str) -> int:
 
 
 def _openai_tts(model: str, text: str, voice: str, output_path: str) -> int:
-    client = _get_oa()
+    client = get_openai_client()
     with client.audio.speech.with_streaming_response.create(
         model=model,
         voice=voice,

@@ -1,18 +1,9 @@
 import re
-from openai import OpenAI
-from config import settings
 from schemas import TimestampInput, TimestampOutput, WordSpan, SceneSpan
 from lib.log import get_logger, timed
+from lib.openai_client import get_openai_client
 
 log = get_logger("agent.timestamp")
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 _SENTENCE_END = re.compile(r"[.!?]$")
@@ -74,7 +65,7 @@ def _segment_scenes(
 
 def run(raw_input: dict) -> dict:
     payload = TimestampInput.model_validate(raw_input)
-    client = _get_client()
+    client = get_openai_client()
     whisper_lang = _normalize_whisper_language(payload.language_code)
     log.info(
         "audio=%s target_scene_sec=%.1f lang=%s whisper_lang=%s",

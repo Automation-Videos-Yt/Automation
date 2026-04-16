@@ -1,19 +1,11 @@
 import json
-from openai import OpenAI
 from config import settings
 from schemas import VideoMetaInput, VideoMetaOutput
 from lib.log import get_logger, timed
+from lib.openai_client import get_openai_client
 from .autocomplete import fetch_suggestions
 
 log = get_logger("agent.video_meta")
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 SYSTEM_PROMPT = """You write SEO-optimized YouTube metadata for short-form videos.
@@ -66,7 +58,7 @@ def _gather_keyword_seeds(payload: VideoMetaInput) -> list[str]:
 
 def run(raw_input: dict) -> dict:
     payload = VideoMetaInput.model_validate(raw_input)
-    client = _get_client()
+    client = get_openai_client()
     log.info("working_title=%r script_len=%d", payload.title, len(payload.script_body))
 
     autocomplete = _gather_keyword_seeds(payload)
