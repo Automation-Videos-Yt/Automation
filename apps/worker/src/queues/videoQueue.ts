@@ -10,6 +10,14 @@ export const VIDEO_QUEUE = "videoQueue";
 
 export const videoQueue = new Queue(VIDEO_QUEUE, { connection });
 
+export type RunFeatures = {
+  enableTimestamp: boolean;
+  enableSubtitles: boolean;
+  enableThumbnail: boolean;
+  enableHookVariants: boolean;
+};
+
 export type VideoJobData = {
   runId: string;
+  features?: RunFeatures;
 };

@@ -106,6 +106,31 @@ type ThumbnailOutput = {
   quality: string;
 };
 
+type RunFeatures = {
+  enableTimestamp: boolean;
+  enableSubtitles: boolean;
+  enableThumbnail: boolean;
+  enableHookVariants: boolean;
+};
+
+const DEFAULT_RUN_FEATURES: RunFeatures = {
+  enableTimestamp: true,
+  enableSubtitles: true,
+  enableThumbnail: true,
+  enableHookVariants: true,
+};
+
+function normalizeRunFeatures(features?: Partial<RunFeatures>): RunFeatures {
+  const next: RunFeatures = {
+    ...DEFAULT_RUN_FEATURES,
+    ...(features ?? {}),
+  };
+  if (!next.enableTimestamp) {
+    next.enableSubtitles = false;
+  }
+  return next;
+}
+
 // Thumbnail tiers driven by prediction score. Cost-optimised to keep every
 // tier well under its budget; "high" is reserved for a future ELITE tier.
 //   strong:  1536x1024 medium (~$0.07)
@@ -128,11 +153,65 @@ function voiceTierFromScore(score: number): "elite" | "premium" | "economy" {
   return score >= 7.5 ? "premium" : "economy";
 }
 
+function toPrimaryLanguageCode(code: string | null | undefined): string {
+  const normalized = (code ?? "").trim().toLowerCase().replace(/_/g, "-");
+  if (!normalized) return "en";
+  return normalized.split("-")[0] || "en";
+}
+
+function isEnglishLanguage(code: string | null | undefined): boolean {
+  return toPrimaryLanguageCode(code) === "en";
+}
+
+function buildFallbackScenesFromNarration(opts: {
+  narration: string;
+  totalDurationSec: number;
+  targetSceneSec: number;
+}): SceneSpanOut[] {
+  const cleaned = opts.narration.replace(/\s+/g, " ").trim();
+  const totalDurationSec = Math.max(
+    0.5,
+    opts.totalDurationSec || opts.targetSceneSec || 6,
+  );
+
+  if (!cleaned) {
+    return [{ index: 0, start: 0, end: totalDurationSec, text: "" }];
+  }
+
+  const sentenceParts = cleaned
+    .split(/(?<=[.!?।])\s+|\n+/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const parts = sentenceParts.length > 0 ? sentenceParts : [cleaned];
+
+  const desiredScenes = Math.max(
+    1,
+    Math.ceil(totalDurationSec / Math.max(1, opts.targetSceneSec)),
+  );
+  const chunkSize = Math.max(1, Math.ceil(parts.length / desiredScenes));
+
+  const sceneTexts: string[] = [];
+  for (let i = 0; i < parts.length; i += chunkSize) {
+    sceneTexts.push(parts.slice(i, i + chunkSize).join(" "));
+  }
+
+  const perSceneSec = totalDurationSec / sceneTexts.length;
+  return sceneTexts.map((text, index) => {
+    const start = index * perSceneSec;
+    const end =
+      index === sceneTexts.length - 1
+        ? totalDurationSec
+        : (index + 1) * perSceneSec;
+    return { index, start, end, text };
+  });
+}
+
 type SeedHookVariantRunsInput = {
   parentRunId: string;
   experimentId: string;
   niche: string;
   languageCode: string;
+  features: RunFeatures;
   targetDurationSec: number;
   topic: TopicOutput;
   topicEmbedding: number[];
@@ -239,7 +318,7 @@ async function maybeSeedHookVariantRuns(
 
       await videoQueue.add(
         "run-pipeline",
-        { runId: childRun.id },
+        { runId: childRun.id, features: input.features },
         {
           jobId: childRun.id,
           attempts: 3,
@@ -318,7 +397,10 @@ async function withAgentLog<T>(
   }
 }
 
-export async function runPipeline(runId: string): Promise<void> {
+export async function runPipeline(
+  runId: string,
+  requestedFeatures?: Partial<RunFeatures>,
+): Promise<void> {
   const log = scoped("pipeline", runId);
   const run = await prisma.pipelineRun.findUnique({ where: { id: runId } });
   if (!run) {
@@ -326,12 +408,14 @@ export async function runPipeline(runId: string): Promise<void> {
     throw new Error(`run ${runId} not found`);
   }
   const experimentId = run.experimentId ?? run.id;
+  const runFeatures = normalizeRunFeatures(requestedFeatures);
 
   log.info(
-    { niche: run.niche, languageCode: run.languageCode },
+    { niche: run.niche, languageCode: run.languageCode, features: runFeatures },
     "pipeline start",
   );
   const pipelineStart = Date.now();
+  const isEnglishRun = isEnglishLanguage(run.languageCode);
 
   await prisma.pipelineRun.update({
     where: { id: runId },
@@ -552,7 +636,11 @@ export async function runPipeline(runId: string): Promise<void> {
       );
     }
 
-    if (env.ENABLE_HOOK_AB_TESTING && hookVariantsForExperiment.length > 1) {
+    if (
+      env.ENABLE_HOOK_AB_TESTING &&
+      runFeatures.enableHookVariants &&
+      hookVariantsForExperiment.length > 1
+    ) {
       const persistedTopic = await prisma.topic.findUnique({
         where: { runId },
         select: { titleEmbedding: true },
@@ -562,6 +650,7 @@ export async function runPipeline(runId: string): Promise<void> {
         experimentId,
         niche: run.niche,
         languageCode: run.languageCode,
+        features: runFeatures,
         targetDurationSec: run.targetDurationSec,
         topic,
         topicEmbedding: persistedTopic?.titleEmbedding ?? [],
@@ -578,6 +667,8 @@ export async function runPipeline(runId: string): Promise<void> {
           "hook A/B variants seeded",
         );
       }
+    } else if (!runFeatures.enableHookVariants) {
+      log.info("hook A/B variants skipped (run feature disabled)");
     }
 
     // ============================================================
@@ -708,39 +799,65 @@ export async function runPipeline(runId: string): Promise<void> {
     }
 
     // ============================================================
-    // Stage 5: TIMESTAMP  (cache: AgentLog where agent=timestamp, SUCCESS)
+    // Stage 5: TIMESTAMP  (English + feature enabled; otherwise fallback scenes)
     // ============================================================
     const stageA0 = Date.now();
     await advanceStage("TIMESTAMP", "timestamp");
     let ts: TimestampOutput;
-    const cachedTs = await loadTimestamp(runId);
-    if (cachedTs) {
-      ts = cachedTs;
-      log.info("stage=TIMESTAMP skipped (cached)");
-    } else {
-      log.info("stage=TIMESTAMP start");
-      // Keep a usable number of scenes on short videos — forcing 7.5s chunks on
-      // a 15s video would give only 2 scenes which feels static.
+    if (!runFeatures.enableTimestamp || !isEnglishRun) {
       const targetSceneSec = run.targetDurationSec < 30 ? 4 : 7.5;
-      const tsInput = {
-        audio_path: voice.audio_path,
-        script_text: narration,
-        target_scene_sec: targetSceneSec,
-      };
-      ts = await withAgentLog(runId, "timestamp", tsInput, () =>
-        runAgent<typeof tsInput, TimestampOutput>("timestamp", tsInput, {
-          runId,
+      ts = {
+        total_duration_sec: voice.duration_sec,
+        words: [],
+        scenes: buildFallbackScenesFromNarration({
+          narration,
+          totalDurationSec: voice.duration_sec,
+          targetSceneSec,
         }),
-      );
+      };
       log.info(
         {
+          languageCode: run.languageCode,
+          reason: !runFeatures.enableTimestamp
+            ? "feature-disabled"
+            : "non-english",
           scenes: ts.scenes.length,
-          words: ts.words.length,
           total: ts.total_duration_sec,
           stageMs: Date.now() - stageA0,
         },
-        "stage=TIMESTAMP done",
+        "stage=TIMESTAMP skipped",
       );
+    } else {
+      const cachedTs = await loadTimestamp(runId);
+      if (cachedTs) {
+        ts = cachedTs;
+        log.info("stage=TIMESTAMP skipped (cached)");
+      } else {
+        log.info("stage=TIMESTAMP start");
+        // Keep a usable number of scenes on short videos — forcing 7.5s chunks on
+        // a 15s video would give only 2 scenes which feels static.
+        const targetSceneSec = run.targetDurationSec < 30 ? 4 : 7.5;
+        const tsInput = {
+          audio_path: voice.audio_path,
+          script_text: narration,
+          target_scene_sec: targetSceneSec,
+          language_code: run.languageCode,
+        };
+        ts = await withAgentLog(runId, "timestamp", tsInput, () =>
+          runAgent<typeof tsInput, TimestampOutput>("timestamp", tsInput, {
+            runId,
+          }),
+        );
+        log.info(
+          {
+            scenes: ts.scenes.length,
+            words: ts.words.length,
+            total: ts.total_duration_sec,
+            stageMs: Date.now() - stageA0,
+          },
+          "stage=TIMESTAMP done",
+        );
+      }
     }
 
     // ============================================================
@@ -900,14 +1017,29 @@ export async function runPipeline(runId: string): Promise<void> {
         "scene pipeline + meta ready",
       );
 
-      // Subtitles regenerate cheaply — just rewrite the SRT.
-      const srtPath = path.join(tempDir, "subs.srt");
-      await generateSrtFromWords({
-        words: ts.words,
-        outputPath: srtPath,
-        wordsPerCue: 5,
-      });
-      log.debug({ srtPath, words: ts.words.length }, "subtitles written");
+      let srtPath = "";
+      if (runFeatures.enableSubtitles && isEnglishRun && ts.words.length > 0) {
+        // Subtitles regenerate cheaply — just rewrite the SRT.
+        srtPath = path.join(tempDir, "subs.srt");
+        await generateSrtFromWords({
+          words: ts.words,
+          outputPath: srtPath,
+          wordsPerCue: 5,
+        });
+        log.debug({ srtPath, words: ts.words.length }, "subtitles written");
+      } else {
+        log.info(
+          {
+            languageCode: run.languageCode,
+            reason: !runFeatures.enableSubtitles
+              ? "feature-disabled"
+              : !isEnglishRun
+                ? "non-english"
+                : "no-words",
+          },
+          "subtitles skipped",
+        );
+      }
 
       await prisma.pipelineRun.update({
         where: { id: runId },
@@ -948,7 +1080,9 @@ export async function runPipeline(runId: string): Promise<void> {
     // ============================================================
     // Stage 8: THUMBNAIL (gpt-image-1 16:9 tile) — feature-flagged
     // ============================================================
-    if (!env.ENABLE_THUMBNAIL_AGENT) {
+    if (!runFeatures.enableThumbnail) {
+      log.info("stage=THUMBNAIL skipped (run feature disabled)");
+    } else if (!env.ENABLE_THUMBNAIL_AGENT) {
       log.info("stage=THUMBNAIL skipped (ENABLE_THUMBNAIL_AGENT=false)");
     } else {
       const stageT8 = Date.now();

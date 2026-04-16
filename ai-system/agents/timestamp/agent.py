@@ -18,6 +18,19 @@ def _get_client() -> OpenAI:
 _SENTENCE_END = re.compile(r"[.!?]$")
 
 
+def _normalize_whisper_language(code: str | None) -> str | None:
+    """Map incoming locale (e.g. hi, pt-BR) to Whisper's language hint."""
+    if not code:
+        return None
+    norm = code.strip().lower().replace("_", "-")
+    if not norm:
+        return None
+    primary = norm.split("-", 1)[0]
+    if len(primary) == 2 and primary.isalpha():
+        return primary
+    return None
+
+
 def _segment_scenes(
     words: list[WordSpan], target_scene_sec: float
 ) -> list[SceneSpan]:
@@ -62,15 +75,28 @@ def _segment_scenes(
 def run(raw_input: dict) -> dict:
     payload = TimestampInput.model_validate(raw_input)
     client = _get_client()
-    log.info("audio=%s target_scene_sec=%.1f", payload.audio_path, payload.target_scene_sec)
+    whisper_lang = _normalize_whisper_language(payload.language_code)
+    log.info(
+        "audio=%s target_scene_sec=%.1f lang=%s whisper_lang=%s",
+        payload.audio_path,
+        payload.target_scene_sec,
+        payload.language_code,
+        whisper_lang,
+    )
 
     with timed(log, "openai.whisper.transcribe"):
         with open(payload.audio_path, "rb") as f:
+            req = {
+                "model": "whisper-1",
+                "file": f,
+                "response_format": "verbose_json",
+                "timestamp_granularities": ["word"],
+            }
+            if whisper_lang:
+                req["language"] = whisper_lang
+
             resp = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f,
-                response_format="verbose_json",
-                timestamp_granularities=["word"],
+                **req,
             )
 
     # The SDK returns a Pydantic-ish object; normalize.

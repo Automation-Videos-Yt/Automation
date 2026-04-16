@@ -248,6 +248,13 @@ export type RunCost = {
   };
 };
 
+export type RunFeatureToggles = {
+  enableTimestamp: boolean;
+  enableSubtitles: boolean;
+  enableThumbnail: boolean;
+  enableHookVariants: boolean;
+};
+
 export type AgentLog = {
   id: string;
   agent: string;
@@ -291,11 +298,12 @@ export const api = {
     niche: string,
     durationSec: number = 75,
     languageCode: string = "en",
+    features?: Partial<RunFeatureToggles>,
   ) {
     return fetch(`${API_URL}/pipeline/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ niche, durationSec, languageCode }),
+      body: JSON.stringify({ niche, durationSec, languageCode, features }),
     }).then<PipelineRun>(handle);
   },
 
@@ -304,11 +312,18 @@ export const api = {
     count: number,
     durationSec: number = 75,
     languageCodes: string[] = ["en"],
+    features?: Partial<RunFeatureToggles>,
   ) {
     return fetch(`${API_URL}/pipeline/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ niche, count, durationSec, languageCodes }),
+      body: JSON.stringify({
+        niche,
+        count,
+        durationSec,
+        languageCodes,
+        features,
+      }),
     }).then<{ count: number; runs: PipelineRun[] }>(handle);
   },
 

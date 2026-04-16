@@ -6,6 +6,7 @@ import { runUpload } from "./upload/upload-runner";
 import { runEnrichment } from "./enrichment/enrichment-runner";
 import { startAnalyticsSyncCron } from "./cron/analytics-sync";
 import { logger, scoped } from "./lib/logger";
+import type { RunFeatures } from "./queues/videoQueue";
 
 const log = scoped("worker");
 
@@ -27,14 +28,14 @@ const shouldRunEnrichment = role === "all" || role === "enrichment";
 // Video-generation pipeline worker
 // ------------------------------------------------------------
 if (shouldRunVideo) {
-  const videoWorker = new Worker<{ runId: string }>(
+  const videoWorker = new Worker<{ runId: string; features?: RunFeatures }>(
     "videoQueue",
     async (job) => {
       const jobLog = scoped("worker", job.data.runId);
       jobLog.info({ jobId: job.id }, "video job picked up");
       const started = Date.now();
       try {
-        await runPipeline(job.data.runId);
+        await runPipeline(job.data.runId, job.data.features);
         jobLog.info(
           { jobId: job.id, durationMs: Date.now() - started },
           "video job completed",

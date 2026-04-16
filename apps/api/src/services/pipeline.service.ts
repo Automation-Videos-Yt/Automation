@@ -5,6 +5,31 @@ import { scoped } from "../lib/logger";
 
 const log = scoped("pipeline-svc");
 
+export type RunFeatures = {
+  enableTimestamp: boolean;
+  enableSubtitles: boolean;
+  enableThumbnail: boolean;
+  enableHookVariants: boolean;
+};
+
+const DEFAULT_RUN_FEATURES: RunFeatures = {
+  enableTimestamp: true,
+  enableSubtitles: true,
+  enableThumbnail: true,
+  enableHookVariants: true,
+};
+
+function normalizeRunFeatures(features?: Partial<RunFeatures>): RunFeatures {
+  const next: RunFeatures = {
+    ...DEFAULT_RUN_FEATURES,
+    ...(features ?? {}),
+  };
+  if (!next.enableTimestamp) {
+    next.enableSubtitles = false;
+  }
+  return next;
+}
+
 export type HookExperimentRun = {
   runId: string;
   hookText: string | null;
@@ -80,12 +105,21 @@ export async function createPipelineBatch(
   count: number,
   durationSec = 75,
   languageCodes: string[] = ["en"],
+  features?: Partial<RunFeatures>,
 ) {
   const normalizedLanguageCodes = normalizeLanguageCodes(languageCodes);
+  const normalizedFeatures = normalizeRunFeatures(features);
   const runs = [];
   for (let i = 0; i < count; i++) {
     for (const languageCode of normalizedLanguageCodes) {
-      runs.push(await createPipelineRun(niche, durationSec, languageCode));
+      runs.push(
+        await createPipelineRun(
+          niche,
+          durationSec,
+          languageCode,
+          normalizedFeatures,
+        ),
+      );
     }
   }
   log.info(
@@ -93,6 +127,7 @@ export async function createPipelineBatch(
       niche,
       count,
       languageCodes: normalizedLanguageCodes,
+      features: normalizedFeatures,
       totalRuns: runs.length,
       runIds: runs.map((r) => r.id),
     },
@@ -105,9 +140,11 @@ export async function createPipelineRun(
   niche: string,
   durationSec = 75,
   languageCode = "en",
+  features?: Partial<RunFeatures>,
 ) {
   const normalizedLanguageCode =
     normalizeLanguageCodes([languageCode])[0] ?? "en";
+  const normalizedFeatures = normalizeRunFeatures(features);
   const run = await prisma.$transaction(async (tx) => {
     const created = await tx.pipelineRun.create({
       data: {
@@ -130,13 +167,14 @@ export async function createPipelineRun(
       niche,
       durationSec,
       languageCode: normalizedLanguageCode,
+      features: normalizedFeatures,
     },
     "run created",
   );
 
   await videoQueue.add(
     "run-pipeline",
-    { runId: run.id },
+    { runId: run.id, features: normalizedFeatures },
     {
       jobId: run.id,
       attempts: 3,

@@ -3,7 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { api } from "../services/api";
+import { api, type RunFeatureToggles } from "../services/api";
 
 type Preset = { label: string; value: number };
 const PRESETS: Preset[] = [
@@ -25,12 +25,45 @@ const LANGUAGE_OPTIONS = [
   { code: "ja", label: "Japanese" },
 ];
 
+const FEATURE_OPTIONS: Array<{
+  key: keyof RunFeatureToggles;
+  label: string;
+  hint: string;
+}> = [
+  {
+    key: "enableTimestamp",
+    label: "Timestamp Alignment",
+    hint: "Whisper word timing for better scene pacing.",
+  },
+  {
+    key: "enableSubtitles",
+    label: "Burned-In Subtitles",
+    hint: "Render subtitles directly into the final video.",
+  },
+  {
+    key: "enableThumbnail",
+    label: "AI Thumbnail",
+    hint: "Generate a custom thumbnail when enabled server-side.",
+  },
+  {
+    key: "enableHookVariants",
+    label: "Hook A/B Variants",
+    hint: "Spawn multiple hook variants when A/B testing is enabled.",
+  },
+];
+
 export default function HomePage() {
   const [niche, setNiche] = useState("");
   const [durationSec, setDurationSec] = useState<number>(75);
   const [custom, setCustom] = useState(false);
   const [count, setCount] = useState<number>(1);
   const [languageCodes, setLanguageCodes] = useState<string[]>(["en"]);
+  const [features, setFeatures] = useState<RunFeatureToggles>({
+    enableTimestamp: true,
+    enableSubtitles: true,
+    enableThumbnail: true,
+    enableHookVariants: true,
+  });
   const router = useRouter();
 
   const plannedRuns = count * Math.max(languageCodes.length, 1);
@@ -46,12 +79,26 @@ export default function HomePage() {
     });
   }
 
+  function toggleFeature(key: keyof RunFeatureToggles) {
+    setFeatures((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      if (key === "enableTimestamp" && !next.enableTimestamp) {
+        next.enableSubtitles = false;
+      }
+      if (key === "enableSubtitles" && next.enableSubtitles) {
+        next.enableTimestamp = true;
+      }
+      return next;
+    });
+  }
+
   const single = useMutation({
     mutationFn: (v: {
       niche: string;
       durationSec: number;
       languageCode: string;
-    }) => api.createRun(v.niche, v.durationSec, v.languageCode),
+      features: RunFeatureToggles;
+    }) => api.createRun(v.niche, v.durationSec, v.languageCode, v.features),
     onSuccess: (run) => router.push(`/runs/${run.id}`),
   });
 
@@ -61,7 +108,15 @@ export default function HomePage() {
       durationSec: number;
       count: number;
       languageCodes: string[];
-    }) => api.createBatch(v.niche, v.count, v.durationSec, v.languageCodes),
+      features: RunFeatureToggles;
+    }) =>
+      api.createBatch(
+        v.niche,
+        v.count,
+        v.durationSec,
+        v.languageCodes,
+        v.features,
+      ),
     onSuccess: () => router.push("/runs"),
   });
 
@@ -85,12 +140,19 @@ export default function HomePage() {
           const trimmed = niche.trim();
           if (trimmed.length < 3) return;
           if (isMultiCreate) {
-            batch.mutate({ niche: trimmed, durationSec, count, languageCodes });
+            batch.mutate({
+              niche: trimmed,
+              durationSec,
+              count,
+              languageCodes,
+              features,
+            });
           } else {
             single.mutate({
               niche: trimmed,
               durationSec,
               languageCode: languageCodes[0] ?? "en",
+              features,
             });
           }
         }}
@@ -203,6 +265,47 @@ export default function HomePage() {
           <div className="text-xs text-white/50">
             Select one or more languages. Each selected language generates its
             own video run.
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-white/50">
+            Features
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {FEATURE_OPTIONS.map((feature) => {
+              const active = features[feature.key];
+              return (
+                <button
+                  key={feature.key}
+                  type="button"
+                  onClick={() => toggleFeature(feature.key)}
+                  className={`text-left rounded-md border px-3 py-2 transition-colors ${
+                    active
+                      ? "bg-white text-black border-white"
+                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{feature.label}</span>
+                    <span className="text-[11px] uppercase tracking-wide">
+                      {active ? "On" : "Off"}
+                    </span>
+                  </div>
+                  <div
+                    className={`text-xs mt-1 ${
+                      active ? "text-black/70" : "text-white/55"
+                    }`}
+                  >
+                    {feature.hint}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-xs text-white/50">
+            Subtitles require timestamp alignment. Non-English runs currently
+            skip timestamps and subtitles automatically.
           </div>
         </div>
 

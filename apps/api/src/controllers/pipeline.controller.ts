@@ -21,6 +21,7 @@ export async function postRun(req: Request, res: Response, next: NextFunction) {
       input.niche,
       input.durationSec,
       input.languageCode,
+      input.features,
     );
     res.status(201).json(run);
   } catch (err) {
@@ -40,6 +41,7 @@ export async function postBatch(
       input.count,
       input.durationSec,
       input.languageCodes,
+      input.features,
     );
     res.status(201).json({ count: runs.length, runs });
   } catch (err) {
