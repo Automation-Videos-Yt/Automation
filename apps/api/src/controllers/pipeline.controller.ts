@@ -1,9 +1,13 @@
 import type { Request, Response, NextFunction } from "express";
-import { createBatchSchema, createRunSchema } from "../validators/pipeline.schema";
+import {
+  createBatchSchema,
+  createRunSchema,
+} from "../validators/pipeline.schema";
 import {
   PipelineServiceError,
   createPipelineBatch,
   createPipelineRun,
+  getHookExperiment,
   getPipelineLogs,
   getPipelineRun,
   listPipelineRuns,
@@ -23,14 +27,14 @@ export async function postRun(req: Request, res: Response, next: NextFunction) {
 export async function postBatch(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) {
   try {
     const input = createBatchSchema.parse(req.body);
     const runs = await createPipelineBatch(
       input.niche,
       input.count,
-      input.durationSec
+      input.durationSec,
     );
     res.status(201).json({ count: runs.length, runs });
   } catch (err) {
@@ -51,7 +55,11 @@ export async function getRun(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-export async function getRunLogs(req: Request, res: Response, next: NextFunction) {
+export async function getRunLogs(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const logs = await getPipelineLogs(req.params.id);
     res.json(logs);
@@ -60,7 +68,28 @@ export async function getRunLogs(req: Request, res: Response, next: NextFunction
   }
 }
 
-export async function listRuns(_req: Request, res: Response, next: NextFunction) {
+export async function getRunExperiment(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const experiment = await getHookExperiment(req.params.id);
+    if (!experiment) {
+      res.status(404).json({ error: "Run not found" });
+      return;
+    }
+    res.json(experiment);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listRuns(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const runs = await listPipelineRuns();
     res.json(runs);
@@ -72,7 +101,7 @@ export async function listRuns(_req: Request, res: Response, next: NextFunction)
 export async function postRetry(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) {
   try {
     const run = await retryPipelineRun(req.params.id);
@@ -83,8 +112,8 @@ export async function postRetry(
         err.code === "NOT_FOUND"
           ? 404
           : err.code === "ALREADY_RUNNING" || err.code === "ALREADY_DONE"
-          ? 409
-          : 400;
+            ? 409
+            : 400;
       res.status(status).json({ error: err.code, message: err.message });
       return;
     }

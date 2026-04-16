@@ -167,8 +167,31 @@ export type Scene = {
   clipDurationSec: number | null;
 };
 
+export type HookExperimentRun = {
+  runId: string;
+  hookText: string | null;
+  status: RunStatus;
+  stage: PipelineStage;
+  uploadStatus: UploadStatus | null;
+  videoUrl: string | null;
+  views: number | null;
+  avgViewPercentage: number | null;
+  watchTimeMinutes: number | null;
+  replayRate: number | null;
+  score: number | null;
+  isWinner: boolean;
+};
+
+export type HookExperimentResponse = {
+  experimentId: string;
+  canPickWinner: boolean;
+  winnerRunId: string | null;
+  runs: HookExperimentRun[];
+};
+
 export type PipelineRun = {
   id: string;
+  experimentId: string | null;
   niche: string;
   targetDurationSec: number;
   stage: PipelineStage;
@@ -237,7 +260,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public body: string,
-    public code?: string
+    public code?: string,
   ) {
     super(`API ${status}: ${body}`);
     this.name = "ApiError";
@@ -280,19 +303,33 @@ export const api = {
   },
 
   getRun(id: string) {
-    return fetch(`${API_URL}/pipeline/${id}`, { cache: "no-store" }).then<PipelineRun>(handle);
+    return fetch(`${API_URL}/pipeline/${id}`, {
+      cache: "no-store",
+    }).then<PipelineRun>(handle);
   },
 
   listRuns() {
-    return fetch(`${API_URL}/pipeline`, { cache: "no-store" }).then<PipelineRun[]>(handle);
+    return fetch(`${API_URL}/pipeline`, { cache: "no-store" }).then<
+      PipelineRun[]
+    >(handle);
   },
 
   getLogs(id: string) {
-    return fetch(`${API_URL}/pipeline/${id}/logs`, { cache: "no-store" }).then<AgentLog[]>(handle);
+    return fetch(`${API_URL}/pipeline/${id}/logs`, { cache: "no-store" }).then<
+      AgentLog[]
+    >(handle);
+  },
+
+  getExperiment(id: string) {
+    return fetch(`${API_URL}/pipeline/${id}/experiment`, {
+      cache: "no-store",
+    }).then<HookExperimentResponse>(handle);
   },
 
   retryRun(id: string) {
-    return fetch(`${API_URL}/pipeline/${id}/retry`, { method: "POST" }).then<PipelineRun>(handle);
+    return fetch(`${API_URL}/pipeline/${id}/retry`, {
+      method: "POST",
+    }).then<PipelineRun>(handle);
   },
 
   mediaUrl(storagePath: string) {
@@ -302,7 +339,9 @@ export const api = {
 
   // --- YouTube ---
   youtubeStatus() {
-    return fetch(`${API_URL}/auth/youtube/status`, { cache: "no-store" }).then<YouTubeStatus>(handle);
+    return fetch(`${API_URL}/auth/youtube/status`, {
+      cache: "no-store",
+    }).then<YouTubeStatus>(handle);
   },
 
   youtubeConnectUrl() {
@@ -311,7 +350,9 @@ export const api = {
   },
 
   youtubeDisconnect() {
-    return fetch(`${API_URL}/auth/youtube/disconnect`, { method: "POST" }).then<{
+    return fetch(`${API_URL}/auth/youtube/disconnect`, {
+      method: "POST",
+    }).then<{
       connected: false;
     }>(handle);
   },
@@ -325,7 +366,9 @@ export const api = {
   },
 
   getUpload(runId: string) {
-    return fetch(`${API_URL}/pipeline/${runId}/upload`, { cache: "no-store" }).then<YouTubeUpload>(handle);
+    return fetch(`${API_URL}/pipeline/${runId}/upload`, {
+      cache: "no-store",
+    }).then<YouTubeUpload>(handle);
   },
 
   // --- Phase 4: analytics + feedback ---

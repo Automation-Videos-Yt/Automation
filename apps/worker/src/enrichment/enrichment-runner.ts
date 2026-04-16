@@ -49,26 +49,15 @@ function hookExperimentScore(
 
 async function maybeAdmitWinningHookFromExperiment(params: {
   runId: string;
+  experimentId: string;
   niche: string;
   topicTitle: string;
   topicAngle: string;
-  scriptBody: string;
   expectedVariants: number;
 }): Promise<void> {
   const candidates = await prisma.pipelineRun.findMany({
     where: {
-      niche: params.niche,
-      topic: {
-        is: {
-          title: params.topicTitle,
-          angle: params.topicAngle,
-        },
-      },
-      script: {
-        is: {
-          body: params.scriptBody,
-        },
-      },
+      experimentId: params.experimentId,
       upload: {
         is: {
           status: "COMPLETED",
@@ -298,10 +287,10 @@ export async function runEnrichment(runId: string): Promise<void> {
   if (env.ENABLE_HOOK_AB_TESTING) {
     await maybeAdmitWinningHookFromExperiment({
       runId,
+      experimentId: run.experimentId ?? run.id,
       niche: run.niche,
       topicTitle: run.topic.title,
       topicAngle: run.topic.angle,
-      scriptBody: run.script.body,
       expectedVariants: env.HOOK_AB_VARIANTS,
     });
   } else if (run.script?.hook) {

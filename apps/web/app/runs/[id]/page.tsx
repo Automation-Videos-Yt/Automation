@@ -9,6 +9,7 @@ import { AnalyticsCard } from "../../../components/AnalyticsCard";
 import { FeedbackCard } from "../../../components/FeedbackCard";
 import { PredictionCard } from "../../../components/PredictionCard";
 import { AssetActions } from "../../../components/AssetActions";
+import { HookExperimentCard } from "../../../components/HookExperimentCard";
 
 const STAGES: PipelineRun["stage"][] = [
   "TOPIC",
@@ -34,10 +35,10 @@ function StageTimeline({ run }: { run: PipelineRun }) {
         const cls = failed
           ? "bg-red-500/20 text-red-300 border-red-500/40"
           : done
-          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-          : active
-          ? "bg-yellow-500/20 text-yellow-200 border-yellow-500/40 animate-pulse"
-          : "bg-white/5 text-white/50 border-white/10";
+            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+            : active
+              ? "bg-yellow-500/20 text-yellow-200 border-yellow-500/40 animate-pulse"
+              : "bg-white/5 text-white/50 border-white/10";
         return (
           <li
             key={s}
@@ -57,10 +58,7 @@ function fmtDur(sec: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function useRunEvents(
-  runId: string,
-  onEvent: (kind: string) => void
-) {
+function useRunEvents(runId: string, onEvent: (kind: string) => void) {
   useEffect(() => {
     if (!runId) return;
     const url = `${
@@ -111,6 +109,7 @@ export default function RunDetailPage() {
   useRunEvents(id, (kind) => {
     qc.invalidateQueries({ queryKey: ["run", id] });
     qc.invalidateQueries({ queryKey: ["run-logs", id] });
+    qc.invalidateQueries({ queryKey: ["run-experiment", id] });
     if (kind === "upload" || kind === "analytics" || kind === "feedback") {
       qc.invalidateQueries({ queryKey: ["upload", id] });
       qc.invalidateQueries({ queryKey: ["run-analytics", id] });
@@ -130,6 +129,17 @@ export default function RunDetailPage() {
     enabled: run?.upload?.status === "COMPLETED",
   });
 
+  const { data: experiment } = useQuery({
+    queryKey: ["run-experiment", id],
+    queryFn: () => api.getExperiment(id),
+    enabled: !!run?.experimentId,
+    refetchInterval: (q) => {
+      const exp = q.state.data;
+      if (!exp) return 10_000;
+      return exp.canPickWinner ? 30_000 : 10_000;
+    },
+  });
+
   if (!run) return <div>Loading...</div>;
 
   return (
@@ -140,12 +150,19 @@ export default function RunDetailPage() {
         <div className="text-xs text-white/50 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>target duration: {run.targetDurationSec}s</span>
           {run.cost && run.cost.totalUsd > 0 && (
-            <span title={`voice $${run.cost.voiceUsd.toFixed(4)} · whisper $${run.cost.whisperUsd.toFixed(4)} · thumbnail $${run.cost.thumbnailUsd.toFixed(4)} · llm $${run.cost.llmUsd.toFixed(4)}`}>
-              spend: <span className="tabular-nums text-white/70">${run.cost.totalUsd.toFixed(3)}</span>
+            <span
+              title={`voice $${run.cost.voiceUsd.toFixed(4)} · whisper $${run.cost.whisperUsd.toFixed(4)} · thumbnail $${run.cost.thumbnailUsd.toFixed(4)} · llm $${run.cost.llmUsd.toFixed(4)}`}
+            >
+              spend:{" "}
+              <span className="tabular-nums text-white/70">
+                ${run.cost.totalUsd.toFixed(3)}
+              </span>
             </span>
           )}
           {run.cost?.source.voiceProvider && (
-            <span className="text-white/40">voice: {run.cost.source.voiceProvider}</span>
+            <span className="text-white/40">
+              voice: {run.cost.source.voiceProvider}
+            </span>
           )}
         </div>
       </div>
@@ -166,7 +183,8 @@ export default function RunDetailPage() {
               {retry.isPending ? "Re-queuing…" : "Retry from last success"}
             </button>
             <span className="text-xs text-white/60">
-              cached stages are reused — only the failing step (and anything after) re-runs
+              cached stages are reused — only the failing step (and anything
+              after) re-runs
             </span>
           </div>
         </div>
@@ -176,19 +194,28 @@ export default function RunDetailPage() {
         <section className="rounded-md border border-white/10 p-4">
           <h2 className="font-semibold mb-2">Topic</h2>
           <div className="font-medium">{run.topic.title}</div>
-          <div className="text-sm text-white/70 mt-1">Angle: {run.topic.angle}</div>
-          <div className="text-sm text-white/60 mt-1">{run.topic.rationale}</div>
+          <div className="text-sm text-white/70 mt-1">
+            Angle: {run.topic.angle}
+          </div>
+          <div className="text-sm text-white/60 mt-1">
+            {run.topic.rationale}
+          </div>
         </section>
       )}
 
       {run.script && (
         <section className="rounded-md border border-white/10 p-4 space-y-2">
           <h2 className="font-semibold">
-            Script · {run.script.wordCount} words · ~{run.script.durationEstimateSec}s
+            Script · {run.script.wordCount} words · ~
+            {run.script.durationEstimateSec}s
           </h2>
-          <p className="text-sm"><span className="text-white/50">Hook:</span> {run.script.hook}</p>
+          <p className="text-sm">
+            <span className="text-white/50">Hook:</span> {run.script.hook}
+          </p>
           <p className="text-sm whitespace-pre-wrap">{run.script.body}</p>
-          <p className="text-sm"><span className="text-white/50">CTA:</span> {run.script.cta}</p>
+          <p className="text-sm">
+            <span className="text-white/50">CTA:</span> {run.script.cta}
+          </p>
         </section>
       )}
 
@@ -197,6 +224,10 @@ export default function RunDetailPage() {
           prediction={run.prediction}
           actual={analyticsData?.latest ?? null}
         />
+      )}
+
+      {experiment && experiment.runs.length > 1 && (
+        <HookExperimentCard experiment={experiment} currentRunId={run.id} />
       )}
 
       {run.hookVariants && run.hookVariants.length > 0 && (
@@ -216,11 +247,15 @@ export default function RunDetailPage() {
                   <div className="text-sm">{v.text}</div>
                   <div className="text-xs tabular-nums text-white/60 shrink-0">
                     {v.score.toFixed(1)}
-                    {v.chosen && <span className="ml-2 text-emerald-400">✓ chosen</span>}
+                    {v.chosen && (
+                      <span className="ml-2 text-emerald-400">✓ chosen</span>
+                    )}
                   </div>
                 </div>
                 {v.reasoning && (
-                  <div className="text-xs text-white/50 mt-1">{v.reasoning}</div>
+                  <div className="text-xs text-white/50 mt-1">
+                    {v.reasoning}
+                  </div>
                 )}
               </li>
             ))}
@@ -249,11 +284,14 @@ export default function RunDetailPage() {
                     {s.clipSource && (
                       <span className="ml-2">
                         · {s.clipSource}
-                        {s.clipDurationSec != null && ` (${s.clipDurationSec.toFixed(1)}s)`}
+                        {s.clipDurationSec != null &&
+                          ` (${s.clipDurationSec.toFixed(1)}s)`}
                       </span>
                     )}
                     {!s.clipUrl && (
-                      <span className="ml-2 text-yellow-400">· placeholder</span>
+                      <span className="ml-2 text-yellow-400">
+                        · placeholder
+                      </span>
                     )}
                   </div>
                 </div>
@@ -292,7 +330,10 @@ export default function RunDetailPage() {
           {run.video.tags && run.video.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {run.video.tags.map((t) => (
-                <span key={t} className="text-xs rounded bg-white/10 px-2 py-0.5">
+                <span
+                  key={t}
+                  className="text-xs rounded bg-white/10 px-2 py-0.5"
+                >
                   {t}
                 </span>
               ))}
@@ -332,11 +373,19 @@ export default function RunDetailPage() {
               {logs.map((l) => (
                 <tr key={l.id} className="border-t border-white/5">
                   <td className="py-1">{l.agent}</td>
-                  <td className={l.status === "FAILED" ? "text-red-400" : "text-emerald-400"}>
+                  <td
+                    className={
+                      l.status === "FAILED"
+                        ? "text-red-400"
+                        : "text-emerald-400"
+                    }
+                  >
                     {l.status}
                   </td>
                   <td className="text-right tabular-nums">{l.durationMs} ms</td>
-                  <td className="pl-4 text-red-300 text-xs">{l.errorMessage ?? ""}</td>
+                  <td className="pl-4 text-red-300 text-xs">
+                    {l.errorMessage ?? ""}
+                  </td>
                 </tr>
               ))}
             </tbody>
