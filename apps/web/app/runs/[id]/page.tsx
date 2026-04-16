@@ -10,6 +10,7 @@ import { FeedbackCard } from "../../../components/FeedbackCard";
 import { PredictionCard } from "../../../components/PredictionCard";
 import { AssetActions } from "../../../components/AssetActions";
 import { HookExperimentCard } from "../../../components/HookExperimentCard";
+import { CostAnalysisCard } from "../../../components/CostAnalysisCard";
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: "English",
@@ -126,6 +127,8 @@ export default function RunDetailPage() {
     qc.invalidateQueries({ queryKey: ["run", id] });
     qc.invalidateQueries({ queryKey: ["run-logs", id] });
     qc.invalidateQueries({ queryKey: ["run-experiment", id] });
+    qc.invalidateQueries({ queryKey: ["run-cost", id] });
+    qc.invalidateQueries({ queryKey: ["run-cost-history", id] });
     if (kind === "upload" || kind === "analytics" || kind === "feedback") {
       qc.invalidateQueries({ queryKey: ["upload", id] });
       qc.invalidateQueries({ queryKey: ["run-analytics", id] });
@@ -196,6 +199,8 @@ export default function RunDetailPage() {
       </div>
 
       <StageTimeline run={run} />
+
+      <CostAnalysisCard runId={run.id} initialCost={run.cost ?? null} />
 
       {canCancel && (
         <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3">

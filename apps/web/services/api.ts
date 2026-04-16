@@ -233,18 +233,79 @@ export type PipelineRun = {
   cost?: RunCost;
 };
 
+export type CostAnalysis = {
+  summary: string;
+  dominantDriver: "voice" | "thumbnail" | "llm" | "whisper" | "mixed";
+  optimizationActions: string[];
+  estimatedSavingsUsd: number;
+};
+
 export type RunCost = {
   voiceUsd: number;
   whisperUsd: number;
   thumbnailUsd: number;
   llmUsd: number;
   totalUsd: number;
+  analysis?: CostAnalysis | null;
+  analysisModel?: string | null;
   source: {
     voiceProvider: string | null;
     voiceChars: number | null;
     audioDurationSec: number | null;
     thumbnailQuality: string | null;
     thumbnailEnabled: boolean;
+  };
+};
+
+export type RunCostResponse = {
+  runId: string;
+  cost: RunCost;
+};
+
+export type CostHistoryEvent = {
+  agent: "script" | "voice" | "thumbnail";
+  at: string;
+  deltaUsd: number;
+  totalUsd: number;
+  breakdown: {
+    voiceUsd: number;
+    whisperUsd: number;
+    thumbnailUsd: number;
+    llmUsd: number;
+    totalUsd: number;
+  };
+  source: {
+    voiceProvider: string | null;
+    voiceChars: number | null;
+    audioDurationSec: number | null;
+    thumbnailQuality: string | null;
+    thumbnailEnabled: boolean;
+  };
+};
+
+export type RunCostHistoryResponse = {
+  runId: string;
+  latest: RunCost;
+  events: CostHistoryEvent[];
+};
+
+export type CostAnalysisCacheStats = {
+  enabled: boolean;
+  model: string;
+  ttlMs: number;
+  now: string;
+  entries: number;
+  inFlight: number;
+  metrics: {
+    requests: number;
+    cacheHits: number;
+    cacheMisses: number;
+    generated: number;
+    failed: number;
+    inFlightWaits: number;
+    skippedDisabled: number;
+    skippedMissingApiKey: number;
+    skippedZeroTotal: number;
   };
 };
 
@@ -426,5 +487,40 @@ export const api = {
     return fetch(`${API_URL}/analytics/channel?days=${days}`, {
       cache: "no-store",
     }).then<ChannelAnalyticsResponse>(handle);
+  },
+
+  // --- Cost analysis ---
+  getRunCost(runId: string, opts?: { refreshAnalysis?: boolean }) {
+    const params = new URLSearchParams();
+    if (opts?.refreshAnalysis) {
+      params.set("refreshAnalysis", "true");
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return fetch(`${API_URL}/cost/run/${runId}${query}`, {
+      cache: "no-store",
+    }).then<RunCostResponse>(handle);
+  },
+
+  getRunCostHistory(
+    runId: string,
+    opts?: { limit?: number; refreshAnalysis?: boolean },
+  ) {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) {
+      params.set("limit", String(opts.limit));
+    }
+    if (opts?.refreshAnalysis) {
+      params.set("refreshAnalysis", "true");
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return fetch(`${API_URL}/cost/run/${runId}/history${query}`, {
+      cache: "no-store",
+    }).then<RunCostHistoryResponse>(handle);
+  },
+
+  getCostCacheStats() {
+    return fetch(`${API_URL}/cost/cache/stats`, {
+      cache: "no-store",
+    }).then<CostAnalysisCacheStats>(handle);
   },
 };
