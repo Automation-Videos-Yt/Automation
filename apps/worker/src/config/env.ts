@@ -44,7 +44,19 @@ const schema = z.object({
   // Privacy used by auto-uploaded A/B variants.
   HOOK_AB_UPLOAD_PRIVACY: z
     .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
-    .default("PRIVATE"),
+    .default("PUBLIC"),
+  // Automatically upload any run when pipeline reaches DONE.
+  AUTO_UPLOAD_ON_PIPELINE_DONE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // Privacy used by pipeline-completion auto-upload.
+  AUTO_UPLOAD_PRIVACY: z
+    .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
+    .default("PUBLIC"),
+  // Delay upload by N minutes after pipeline completion.
+  // 0 means enqueue upload immediately.
+  AUTO_UPLOAD_DELAY_MINUTES: z.coerce.number().int().min(0).default(0),
   // Cron schedule for auto-sync of YouTube analytics. Default: every 6 hours.
   // Set to "" to disable the scheduler entirely.
   ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),

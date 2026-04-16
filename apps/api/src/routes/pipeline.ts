@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  postCancel,
   getRunExperiment,
   getRun,
   getRunLogs,
@@ -24,6 +25,7 @@ pipelineRouter.get("/:id", getRun);
 pipelineRouter.get("/:id/experiment", getRunExperiment);
 pipelineRouter.get("/:id/logs", getRunLogs);
 pipelineRouter.post("/:id/retry", postRetry);
+pipelineRouter.post("/:id/cancel", postCancel);
 pipelineRouter.get("/:id/stream", streamRunEvents);
 pipelineRouter.post("/:id/upload", postUpload);
 pipelineRouter.get("/:id/upload", getUploadStatus);

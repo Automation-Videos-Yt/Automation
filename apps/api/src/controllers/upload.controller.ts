@@ -9,11 +9,15 @@ import {
 export async function postUpload(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) {
   try {
     const input = createUploadSchema.parse(req.body ?? {});
-    const upload = await enqueueUpload(req.params.id, input.privacy);
+    const upload = await enqueueUpload(
+      req.params.id,
+      input.privacy,
+      input.scheduledAt,
+    );
     res.status(202).json(upload);
   } catch (err) {
     if (err instanceof UploadServiceError) {
@@ -21,10 +25,10 @@ export async function postUpload(
         err.code === "NOT_FOUND"
           ? 404
           : err.code === "NOT_CONNECTED"
-          ? 409
-          : err.code === "RUN_NOT_READY"
-          ? 409
-          : 400;
+            ? 409
+            : err.code === "RUN_NOT_READY"
+              ? 409
+              : 400;
       res.status(status).json({ error: err.code, message: err.message });
       return;
     }
@@ -35,7 +39,7 @@ export async function postUpload(
 export async function getUploadStatus(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) {
   try {
     const upload = await getUpload(req.params.id);

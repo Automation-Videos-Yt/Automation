@@ -6,10 +6,26 @@ const log = scoped("auto-upload");
 
 type UploadPrivacy = "PRIVATE" | "UNLISTED" | "PUBLIC";
 
+function normalizeScheduledAt(scheduledAt?: Date | null): Date | null {
+  if (!scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+    return null;
+  }
+  return scheduledAt.getTime() > Date.now() ? scheduledAt : null;
+}
+
+function queueDelayMs(scheduledAt: Date | null): number {
+  if (!scheduledAt) return 0;
+  return Math.max(0, scheduledAt.getTime() - Date.now());
+}
+
 export async function enqueueAutoUploadForRun(
   runId: string,
   privacy: UploadPrivacy,
+  scheduledAt?: Date,
 ): Promise<void> {
+  const effectiveSchedule = normalizeScheduledAt(scheduledAt);
+  const delayMs = queueDelayMs(effectiveSchedule);
+
   const run = await prisma.pipelineRun.findUnique({
     where: { id: runId },
     include: { video: true, upload: true },
@@ -71,6 +87,7 @@ export async function enqueueAutoUploadForRun(
       { runId, uploadId: reset.id },
       {
         jobId: reset.id,
+        delay: delayMs,
         attempts: 3,
         backoff: { type: "exponential", delay: 10_000 },
         removeOnComplete: { count: 100 },
@@ -78,7 +95,15 @@ export async function enqueueAutoUploadForRun(
       },
     );
 
-    log.info({ runId, uploadId: reset.id, privacy }, "auto-upload re-enqueued");
+    log.info(
+      {
+        runId,
+        uploadId: reset.id,
+        privacy,
+        scheduledAt: effectiveSchedule?.toISOString() ?? null,
+      },
+      "auto-upload re-enqueued",
+    );
     return;
   }
 
@@ -95,6 +120,7 @@ export async function enqueueAutoUploadForRun(
     { runId, uploadId: created.id },
     {
       jobId: created.id,
+      delay: delayMs,
       attempts: 3,
       backoff: { type: "exponential", delay: 10_000 },
       removeOnComplete: { count: 100 },
@@ -102,5 +128,13 @@ export async function enqueueAutoUploadForRun(
     },
   );
 
-  log.info({ runId, uploadId: created.id, privacy }, "auto-upload enqueued");
+  log.info(
+    {
+      runId,
+      uploadId: created.id,
+      privacy,
+      scheduledAt: effectiveSchedule?.toISOString() ?? null,
+    },
+    "auto-upload enqueued",
+  );
 }

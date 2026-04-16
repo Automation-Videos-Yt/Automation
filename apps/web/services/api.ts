@@ -357,6 +357,12 @@ export const api = {
     }).then<PipelineRun>(handle);
   },
 
+  cancelRun(id: string) {
+    return fetch(`${API_URL}/pipeline/${id}/cancel`, {
+      method: "POST",
+    }).then<PipelineRun>(handle);
+  },
+
   mediaUrl(storagePath: string) {
     const rel = storagePath.replace(/^\/storage\/?/, "");
     return `${API_URL}/media/${rel}`;
@@ -382,11 +388,11 @@ export const api = {
     }>(handle);
   },
 
-  startUpload(runId: string, privacy: UploadPrivacy) {
+  startUpload(runId: string, privacy: UploadPrivacy, scheduledAt?: string) {
     return fetch(`${API_URL}/pipeline/${runId}/upload`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ privacy }),
+      body: JSON.stringify({ privacy, scheduledAt }),
     }).then<YouTubeUpload>(handle);
   },
 

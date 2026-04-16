@@ -1,9 +1,39 @@
 import { prisma } from "../db/prisma";
 import { videoQueue } from "../queues/videoQueue";
+import { uploadQueue } from "../queues/uploadQueue";
 import { estimateRunCost } from "./cost.service";
 import { scoped } from "../lib/logger";
 
 const log = scoped("pipeline-svc");
+const USER_CANCELLED_MESSAGE = "cancelled by user";
+
+function isUserCancelledMessage(message?: string | null): boolean {
+  return (message ?? "").toLowerCase().includes(USER_CANCELLED_MESSAGE);
+}
+
+async function removeQueuedJobsForRun(
+  queue: typeof videoQueue | typeof uploadQueue,
+  runId: string,
+): Promise<number> {
+  const jobs = await queue.getJobs(
+    ["waiting", "delayed", "prioritized", "paused", "active"],
+    0,
+    -1,
+    true,
+  );
+  let removed = 0;
+  for (const job of jobs) {
+    if (job.data?.runId !== runId) continue;
+    try {
+      await job.remove();
+      removed += 1;
+    } catch {
+      // Active jobs cannot always be removed. The worker cooperatively exits
+      // when it detects the cancellation flag in DB.
+    }
+  }
+  return removed;
+}
 
 export type RunFeatures = {
   enableTimestamp: boolean;
@@ -354,6 +384,67 @@ export async function retryPipelineRun(id: string) {
     },
   );
   log.info({ runId: id, stage: run.stage }, "retry enqueued");
+  return updated;
+}
+
+export async function cancelPipelineRun(id: string) {
+  const run = await prisma.pipelineRun.findUnique({
+    where: { id },
+    include: { upload: true },
+  });
+  if (!run) throw new PipelineServiceError("NOT_FOUND", "run not found");
+
+  if (run.status === "COMPLETED") {
+    throw new PipelineServiceError(
+      "ALREADY_DONE",
+      "run already completed — cannot cancel",
+    );
+  }
+
+  if (run.status === "FAILED") {
+    if (isUserCancelledMessage(run.errorMessage)) {
+      return run;
+    }
+    throw new PipelineServiceError(
+      "ALREADY_DONE",
+      "run already failed — cannot cancel",
+    );
+  }
+
+  const [videoJobsRemoved, uploadJobsRemoved] = await Promise.all([
+    removeQueuedJobsForRun(videoQueue, id),
+    removeQueuedJobsForRun(uploadQueue, id),
+  ]);
+
+  if (
+    run.upload &&
+    (run.upload.status === "PENDING" || run.upload.status === "RUNNING")
+  ) {
+    await prisma.youTubeUpload.update({
+      where: { runId: id },
+      data: {
+        status: "FAILED",
+        errorMessage: USER_CANCELLED_MESSAGE,
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  const updated = await prisma.pipelineRun.update({
+    where: { id },
+    data: {
+      stage: "FAILED",
+      status: "FAILED",
+      currentAgent: null,
+      errorMessage: USER_CANCELLED_MESSAGE,
+    },
+  });
+
+  log.info(
+    { runId: id, videoJobsRemoved, uploadJobsRemoved },
+    "run cancelled by user",
+  );
+
   return updated;
 }
 

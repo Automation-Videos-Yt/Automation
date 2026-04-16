@@ -139,6 +139,15 @@ export default function RunDetailPage() {
     },
   });
 
+  const cancel = useMutation({
+    mutationFn: () => api.cancelRun(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["run", id] });
+      qc.invalidateQueries({ queryKey: ["run-logs", id] });
+      qc.invalidateQueries({ queryKey: ["upload", id] });
+    },
+  });
+
   const { data: analyticsData } = useQuery({
     queryKey: ["run-analytics", id],
     queryFn: () => api.getRunAnalytics(id),
@@ -157,6 +166,8 @@ export default function RunDetailPage() {
   });
 
   if (!run) return <div>Loading...</div>;
+
+  const canCancel = run.status === "QUEUED" || run.status === "RUNNING";
 
   return (
     <div className="space-y-6">
@@ -185,6 +196,24 @@ export default function RunDetailPage() {
       </div>
 
       <StageTimeline run={run} />
+
+      {canCancel && (
+        <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => cancel.mutate()}
+              disabled={cancel.isPending}
+              className="rounded-md bg-yellow-300 text-black text-sm px-3 py-1.5 font-medium disabled:opacity-50"
+            >
+              {cancel.isPending ? "Canceling…" : "Cancel run"}
+            </button>
+            <span className="text-xs text-white/70">
+              stops queued/in-progress pipeline execution and blocks pending
+              scheduled upload jobs
+            </span>
+          </div>
+        </div>
+      )}
 
       {run.status === "FAILED" && (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 space-y-2">

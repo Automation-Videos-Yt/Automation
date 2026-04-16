@@ -35,6 +35,14 @@ import { enqueueAutoUploadForRun } from "./upload/auto-upload";
 const TARGET_WIDTH = 1080;
 const TARGET_HEIGHT = 1920;
 const TARGET_ORIENTATION = "portrait";
+const USER_CANCELLED_MESSAGE = "cancelled by user";
+
+class PipelineCancelledError extends Error {
+  constructor() {
+    super(USER_CANCELLED_MESSAGE);
+    this.name = "PipelineCancelledError";
+  }
+}
 
 type TopicOutput = {
   title: string;
@@ -161,6 +169,32 @@ function toPrimaryLanguageCode(code: string | null | undefined): string {
 
 function isEnglishLanguage(code: string | null | undefined): boolean {
   return toPrimaryLanguageCode(code) === "en";
+}
+
+function isUserCancelledRun(
+  status: string,
+  errorMessage?: string | null,
+): boolean {
+  return (
+    status === "FAILED" &&
+    (errorMessage ?? "").toLowerCase().includes(USER_CANCELLED_MESSAGE)
+  );
+}
+
+async function ensureRunNotCancelled(runId: string): Promise<void> {
+  const latest = await prisma.pipelineRun.findUnique({
+    where: { id: runId },
+    select: { status: true, errorMessage: true },
+  });
+  if (latest && isUserCancelledRun(latest.status, latest.errorMessage)) {
+    throw new PipelineCancelledError();
+  }
+}
+
+function scheduleFromDelayMinutes(delayMinutes: number): Date | null {
+  const minutes = Math.max(0, Math.floor(delayMinutes));
+  if (minutes === 0) return null;
+  return new Date(Date.now() + minutes * 60_000);
 }
 
 function buildFallbackScenesFromNarration(opts: {
@@ -407,6 +441,14 @@ export async function runPipeline(
     log.error("run not found in db");
     throw new Error(`run ${runId} not found`);
   }
+  if (run.status === "COMPLETED") {
+    log.info("pipeline skipped: run already completed");
+    return;
+  }
+  if (isUserCancelledRun(run.status, run.errorMessage)) {
+    log.info("pipeline skipped: run already cancelled");
+    return;
+  }
   const experimentId = run.experimentId ?? run.id;
   const runFeatures = normalizeRunFeatures(requestedFeatures);
 
@@ -417,6 +459,7 @@ export async function runPipeline(
   const pipelineStart = Date.now();
   const isEnglishRun = isEnglishLanguage(run.languageCode);
 
+  await ensureRunNotCancelled(runId);
   await prisma.pipelineRun.update({
     where: { id: runId },
     data: { status: "RUNNING", errorMessage: null, experimentId },
@@ -426,6 +469,7 @@ export async function runPipeline(
   // Single-line helper — every stage transition goes through this so the
   // frontend can react instantly to live changes via SSE.
   async function advanceStage(stage: string, agent: string | null) {
+    await ensureRunNotCancelled(runId);
     await prisma.pipelineRun.update({
       where: { id: runId },
       data: { stage: stage as never, currentAgent: agent },
@@ -1139,15 +1183,30 @@ export async function runPipeline(
       }
     }
 
+    await ensureRunNotCancelled(runId);
     await prisma.pipelineRun.update({
       where: { id: runId },
       data: { stage: "DONE", status: "COMPLETED", currentAgent: null },
     });
     publishRunEvent(runId, "stage", { stage: "DONE", status: "COMPLETED" });
 
-    if (env.ENABLE_HOOK_AB_TESTING && env.HOOK_AB_AUTO_UPLOAD) {
+    const shouldAutoUploadAtDone =
+      env.AUTO_UPLOAD_ON_PIPELINE_DONE ||
+      (env.ENABLE_HOOK_AB_TESTING && env.HOOK_AB_AUTO_UPLOAD);
+
+    if (shouldAutoUploadAtDone) {
+      const uploadPrivacy = env.AUTO_UPLOAD_ON_PIPELINE_DONE
+        ? env.AUTO_UPLOAD_PRIVACY
+        : env.HOOK_AB_UPLOAD_PRIVACY;
+      const scheduledAt = scheduleFromDelayMinutes(
+        env.AUTO_UPLOAD_DELAY_MINUTES,
+      );
       try {
-        await enqueueAutoUploadForRun(runId, env.HOOK_AB_UPLOAD_PRIVACY);
+        await enqueueAutoUploadForRun(
+          runId,
+          uploadPrivacy,
+          scheduledAt ?? undefined,
+        );
       } catch (err) {
         log.error({ err }, "auto-upload enqueue failed");
       }
@@ -1155,6 +1214,34 @@ export async function runPipeline(
 
     log.info({ totalMs: Date.now() - pipelineStart }, "pipeline complete");
   } catch (err) {
+    if (err instanceof PipelineCancelledError) {
+      log.info(
+        { totalMs: Date.now() - pipelineStart },
+        "pipeline cancelled by user",
+      );
+      const latest = await prisma.pipelineRun.findUnique({
+        where: { id: runId },
+        select: { status: true, errorMessage: true },
+      });
+      if (!latest || !isUserCancelledRun(latest.status, latest.errorMessage)) {
+        await prisma.pipelineRun.update({
+          where: { id: runId },
+          data: {
+            stage: "FAILED",
+            status: "FAILED",
+            currentAgent: null,
+            errorMessage: USER_CANCELLED_MESSAGE,
+          },
+        });
+      }
+      publishRunEvent(runId, "stage", {
+        stage: "FAILED",
+        status: "FAILED",
+        reason: "cancelled",
+      });
+      return;
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     log.error(
       { err: message, totalMs: Date.now() - pipelineStart },

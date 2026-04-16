@@ -3,7 +3,7 @@
 Autonomous, self-improving, cost-aware content pipeline. Niche in → Shorts-ready video out → YouTube upload → analytics back into memory → next run is better.
 
 **Current pipeline:**
-`Topic (memory + dedup) → Script → Hook (memory, variants + self-rank) → Prediction → Voice (smart-tiered) → Timestamp (Whisper) → Video Selection (Pexels) → Video (autocomplete SEO, parallel render) → [Thumbnail, off by default] → [Upload] → [Analytics → Feedback → Memory]`
+`Topic (memory + dedup) → Script → Hook (memory, variants + self-rank) → Prediction → Voice (smart-tiered) → Timestamp (Whisper) → Video Selection (Pexels) → Video (autocomplete SEO, parallel render) → [Thumbnail, off by default] → [Upload (manual or scheduled)] → [Analytics → Feedback → Memory]`
 
 ## Architecture
 
@@ -150,6 +150,17 @@ Prediction failures deliberately stay _uncached_ so a retry can try again.
 
 `apps/worker/src/cron/analytics-sync.ts` runs on `ANALYTICS_SYNC_CRON` (default `0 */6 * * *` — every 6 hours). On each tick it enqueues an enrichment job for every `COMPLETED` upload, so analytics → feedback → memory keeps flowing without manual clicks. Set the env var to `""` to disable.
 
+## Upload scheduler and cancel
+
+- Manual upload supports scheduling: `POST /pipeline/:id/upload` accepts `{ privacy, scheduledAt? }`, where `scheduledAt` is an ISO datetime.
+- If `scheduledAt` is omitted (or not in the future), upload is queued immediately.
+- Automatic scheduling after pipeline completion is controlled by `AUTO_UPLOAD_ON_PIPELINE_DONE` + `AUTO_UPLOAD_DELAY_MINUTES`.
+- Run cancellation is supported via `POST /pipeline/:id/cancel`.
+- Cancel behavior:
+  - queued/delayed pipeline and upload jobs for that run are removed from BullMQ;
+  - active pipeline execution stops cooperatively at stage boundaries;
+  - pending/running upload state is marked failed with `cancelled by user`.
+
 ## Batch generation
 
 `POST /pipeline/batch` body: `{ niche, count (1-10), durationSec, languageCodes? }`.
@@ -190,6 +201,11 @@ The OAuth helper + `parseAnalyticsCell` are shared (one copy per app in `integra
 | `WORKER_ROLE`                   | `all`         | Worker role selector: `all`, `video`, `upload`, `enrichment`. Use dedicated roles when splitting workers.                                                                                 |
 | `ANALYTICS_SYNC_CRON`           | `0 */6 * * *` | node-cron expression for auto-enrichment. Empty string disables.                                                                                                                          |
 | `ENABLE_ANALYTICS_CRON`         | `true`        | Enables cron scheduler in this worker process. Set `false` on non-enrichment roles.                                                                                                       |
+| `HOOK_AB_AUTO_UPLOAD`           | `true`        | Auto-enqueues upload for each hook A/B variant run when it reaches `DONE`.                                                                                                                |
+| `HOOK_AB_UPLOAD_PRIVACY`        | `PRIVATE`     | Privacy status used for A/B auto-upload when pipeline-wide auto-upload is disabled.                                                                                                       |
+| `AUTO_UPLOAD_ON_PIPELINE_DONE`  | `false`       | When `true`, the worker auto-enqueues YouTube upload as soon as a run reaches `DONE` (applies to normal runs, not just hook A/B).                                                         |
+| `AUTO_UPLOAD_PRIVACY`           | `PUBLIC`      | Privacy status used by pipeline-completion auto-upload (`PRIVATE`, `UNLISTED`, `PUBLIC`).                                                                                                 |
+| `AUTO_UPLOAD_DELAY_MINUTES`     | `0`           | Scheduler delay after pipeline completion before upload job starts. `0` uploads immediately; values > 0 delay by N minutes.                                                               |
 | `LOG_LEVEL`                     | `info`        | `debug` exposes BullMQ events + aiClient input summaries + cache HIT lines.                                                                                                               |
 | `WORKER_CONCURRENCY`            | `1`           | Parallel pipeline runs per worker. Watch FFmpeg CPU if you bump it.                                                                                                                       |
 | `UPLOAD_WORKER_CONCURRENCY`     | `1`           | Parallel uploads per upload-role worker. Increase carefully to avoid API quota spikes.                                                                                                    |
@@ -226,26 +242,27 @@ YouTubeAccount   (singleton id="default": accessToken, refreshToken, channelId)
 
 ## Endpoints
 
-| Method | Path                                     | Purpose                                                                                    |
-| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `POST` | `/pipeline/run`                          | start one run (body: `{ niche, durationSec?, languageCode? }`)                             |
-| `POST` | `/pipeline/batch`                        | start multilingual batches (body: `{ niche, count (1-10), durationSec?, languageCodes? }`) |
-| `GET`  | `/pipeline`                              | list recent runs                                                                           |
-| `GET`  | `/pipeline/:id`                          | full run detail + cost breakdown                                                           |
-| `GET`  | `/pipeline/:id/logs`                     | per-stage agent logs                                                                       |
-| `GET`  | `/pipeline/:id/stream`                   | **SSE** — live events for this run                                                         |
-| `POST` | `/pipeline/:id/retry`                    | resume FAILED run from last success                                                        |
-| `POST` | `/pipeline/:id/upload`                   | upload completed video to YouTube                                                          |
-| `GET`  | `/pipeline/:id/upload`                   | upload status                                                                              |
-| `POST` | `/pipeline/:id/analytics/sync`           | queue analytics refresh for this run                                                       |
-| `GET`  | `/pipeline/:id/analytics`                | latest snapshot + history + feedback                                                       |
-| `POST` | `/analytics/sync`                        | queue refresh for all uploads                                                              |
-| `GET`  | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data                                                               |
-| `GET`  | `/auth/youtube`                          | start OAuth flow                                                                           |
-| `GET`  | `/auth/youtube/callback`                 | OAuth return URL                                                                           |
-| `GET`  | `/auth/youtube/status`                   | connected? channel info                                                                    |
-| `POST` | `/auth/youtube/disconnect`               | drop stored tokens                                                                         |
-| `GET`  | `/media/*`                               | static-serve generated audio / video / thumbnail / subs                                    |
+| Method | Path                                     | Purpose                                                                                          |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `POST` | `/pipeline/run`                          | start one run (body: `{ niche, durationSec?, languageCode? }`)                                   |
+| `POST` | `/pipeline/batch`                        | start multilingual batches (body: `{ niche, count (1-10), durationSec?, languageCodes? }`)       |
+| `GET`  | `/pipeline`                              | list recent runs                                                                                 |
+| `GET`  | `/pipeline/:id`                          | full run detail + cost breakdown                                                                 |
+| `GET`  | `/pipeline/:id/logs`                     | per-stage agent logs                                                                             |
+| `GET`  | `/pipeline/:id/stream`                   | **SSE** — live events for this run                                                               |
+| `POST` | `/pipeline/:id/retry`                    | resume FAILED run from last success                                                              |
+| `POST` | `/pipeline/:id/cancel`                   | cancel a queued/running run; removes queued jobs and cooperatively halts active pipeline work    |
+| `POST` | `/pipeline/:id/upload`                   | upload completed video to YouTube now or later (body: `{ privacy, scheduledAt? }`, ISO datetime) |
+| `GET`  | `/pipeline/:id/upload`                   | upload status                                                                                    |
+| `POST` | `/pipeline/:id/analytics/sync`           | queue analytics refresh for this run                                                             |
+| `GET`  | `/pipeline/:id/analytics`                | latest snapshot + history + feedback                                                             |
+| `POST` | `/analytics/sync`                        | queue refresh for all uploads                                                                    |
+| `GET`  | `/analytics/channel?days=7\|28\|90\|365` | channel-level dashboard data                                                                     |
+| `GET`  | `/auth/youtube`                          | start OAuth flow                                                                                 |
+| `GET`  | `/auth/youtube/callback`                 | OAuth return URL                                                                                 |
+| `GET`  | `/auth/youtube/status`                   | connected? channel info                                                                          |
+| `POST` | `/auth/youtube/disconnect`               | drop stored tokens                                                                               |
+| `GET`  | `/media/*`                               | static-serve generated audio / video / thumbnail / subs                                          |
 
 ## Project layout
 

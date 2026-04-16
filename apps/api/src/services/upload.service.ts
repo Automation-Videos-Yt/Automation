@@ -5,15 +5,34 @@ import { scoped } from "../lib/logger";
 const log = scoped("upload-svc");
 
 export class UploadServiceError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
 
+function normalizeScheduledAt(scheduledAt?: Date | null): Date | null {
+  if (!scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+    return null;
+  }
+  return scheduledAt.getTime() > Date.now() ? scheduledAt : null;
+}
+
+function queueDelayMs(scheduledAt: Date | null): number {
+  if (!scheduledAt) return 0;
+  return Math.max(0, scheduledAt.getTime() - Date.now());
+}
+
 export async function enqueueUpload(
   runId: string,
-  privacy: "PRIVATE" | "UNLISTED" | "PUBLIC"
+  privacy: "PRIVATE" | "UNLISTED" | "PUBLIC",
+  scheduledAt?: Date,
 ) {
+  const effectiveSchedule = normalizeScheduledAt(scheduledAt);
+  const delayMs = queueDelayMs(effectiveSchedule);
+
   const run = await prisma.pipelineRun.findUnique({
     where: { id: runId },
     include: { video: true, upload: true },
@@ -22,7 +41,7 @@ export async function enqueueUpload(
   if (run.status !== "COMPLETED" || !run.video) {
     throw new UploadServiceError(
       "RUN_NOT_READY",
-      `run is ${run.status} — upload requires COMPLETED run with a rendered video`
+      `run is ${run.status} — upload requires COMPLETED run with a rendered video`,
     );
   }
 
@@ -32,7 +51,7 @@ export async function enqueueUpload(
   if (!account) {
     throw new UploadServiceError(
       "NOT_CONNECTED",
-      "connect a YouTube account first at /auth/youtube"
+      "connect a YouTube account first at /auth/youtube",
     );
   }
 
@@ -62,13 +81,21 @@ export async function enqueueUpload(
       { runId, uploadId: reset.id },
       {
         jobId: reset.id,
+        delay: delayMs,
         attempts: 3,
         backoff: { type: "exponential", delay: 10_000 },
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 100 },
-      }
+      },
     );
-    log.info({ runId, uploadId: reset.id }, "upload re-enqueued");
+    log.info(
+      {
+        runId,
+        uploadId: reset.id,
+        scheduledAt: effectiveSchedule?.toISOString() ?? null,
+      },
+      "upload re-enqueued",
+    );
     return reset;
   }
 
@@ -84,13 +111,21 @@ export async function enqueueUpload(
     { runId, uploadId: created.id },
     {
       jobId: created.id,
+      delay: delayMs,
       attempts: 3,
       backoff: { type: "exponential", delay: 10_000 },
       removeOnComplete: { count: 100 },
       removeOnFail: { count: 100 },
-    }
+    },
   );
-  log.info({ runId, uploadId: created.id }, "upload enqueued");
+  log.info(
+    {
+      runId,
+      uploadId: created.id,
+      scheduledAt: effectiveSchedule?.toISOString() ?? null,
+    },
+    "upload enqueued",
+  );
   return created;
 }
 

@@ -4,6 +4,7 @@ import {
   createRunSchema,
 } from "../validators/pipeline.schema";
 import {
+  cancelPipelineRun,
   PipelineServiceError,
   createPipelineBatch,
   createPipelineRun,
@@ -119,6 +120,29 @@ export async function postRetry(
         err.code === "NOT_FOUND"
           ? 404
           : err.code === "ALREADY_RUNNING" || err.code === "ALREADY_DONE"
+            ? 409
+            : 400;
+      res.status(status).json({ error: err.code, message: err.message });
+      return;
+    }
+    next(err);
+  }
+}
+
+export async function postCancel(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const run = await cancelPipelineRun(req.params.id);
+    res.status(202).json(run);
+  } catch (err) {
+    if (err instanceof PipelineServiceError) {
+      const status =
+        err.code === "NOT_FOUND"
+          ? 404
+          : err.code === "ALREADY_DONE"
             ? 409
             : 400;
       res.status(status).json({ error: err.code, message: err.message });

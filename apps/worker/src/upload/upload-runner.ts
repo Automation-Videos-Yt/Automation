@@ -3,6 +3,12 @@ import { scoped } from "../lib/logger";
 import { publishRunEvent } from "../events/publisher";
 import { uploadToYouTube } from "./youtubeClient";
 
+const USER_CANCELLED_MESSAGE = "cancelled by user";
+
+function isUserCancelledRun(errorMessage?: string | null): boolean {
+  return (errorMessage ?? "").toLowerCase().includes(USER_CANCELLED_MESSAGE);
+}
+
 export async function runUpload(uploadId: string): Promise<void> {
   const log = scoped("upload", uploadId);
   const upload = await prisma.youTubeUpload.findUnique({
@@ -13,6 +19,35 @@ export async function runUpload(uploadId: string): Promise<void> {
     log.error("upload not found");
     throw new Error(`upload ${uploadId} not found`);
   }
+
+  if (upload.status !== "PENDING") {
+    log.info(
+      { status: upload.status },
+      "upload skipped: stale non-pending job",
+    );
+    return;
+  }
+
+  if (
+    upload.run.status === "FAILED" &&
+    isUserCancelledRun(upload.run.errorMessage)
+  ) {
+    await prisma.youTubeUpload.update({
+      where: { id: uploadId },
+      data: {
+        status: "FAILED",
+        errorMessage: USER_CANCELLED_MESSAGE,
+        completedAt: new Date(),
+      },
+    });
+    publishRunEvent(upload.runId, "upload", {
+      status: "FAILED",
+      reason: "run_cancelled",
+    });
+    log.info("upload skipped: run cancelled");
+    return;
+  }
+
   if (!upload.run.video) {
     const msg = "run has no rendered video";
     log.error(msg);

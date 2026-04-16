@@ -9,6 +9,7 @@ from .scene_schema import (
     VideoSelectionInput,
     VideoSelectionOutput,
     SelectedClip,
+    ClipCandidate,
 )
 from .thumbnail_schema import ThumbnailInput, ThumbnailOutput
 from .feedback_schema import FeedbackInput, FeedbackOutput, FeedbackMetrics
@@ -38,6 +39,7 @@ __all__ = [
     "VideoSelectionInput",
     "VideoSelectionOutput",
     "SelectedClip",
+    "ClipCandidate",
     "ThumbnailInput",
     "ThumbnailOutput",
     "FeedbackInput",
