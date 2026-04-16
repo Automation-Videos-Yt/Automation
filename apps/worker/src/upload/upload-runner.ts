@@ -34,7 +34,7 @@ export async function runUpload(uploadId: string): Promise<void> {
       privacy: upload.privacy,
       videoPath: upload.run.video.videoPath,
     },
-    "upload start"
+    "upload start",
   );
 
   try {
@@ -45,7 +45,12 @@ export async function runUpload(uploadId: string): Promise<void> {
       title: v.title ?? upload.run.niche,
       description: v.description ?? "",
       tags: v.tags,
-      privacyStatus: upload.privacy.toLowerCase() as "private" | "unlisted" | "public",
+      defaultLanguage: upload.run.languageCode,
+      defaultAudioLanguage: upload.run.languageCode,
+      privacyStatus: upload.privacy.toLowerCase() as
+        | "private"
+        | "unlisted"
+        | "public",
     });
 
     await prisma.youTubeUpload.update({

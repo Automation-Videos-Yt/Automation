@@ -20,6 +20,7 @@ SYSTEM_PROMPT = """You write SEO-optimized YouTube metadata for short-form video
 - Title: <=80 chars, click-worthy but truthful, must include at least one real search phrase from the supplied autocomplete list when it fits naturally.
 - Description: 2-4 short paragraphs, first line restates the hook, weave in 3-5 of the real search phrases naturally (no keyword stuffing).
 - Tags: 8-15 specific phrases (no hashtags, lowercase, no duplicates). Prefer real autocomplete phrases over invented ones.
+- Write title, description, and tags in the requested target language code.
 Return only the JSON object the schema requests."""
 
 
@@ -80,6 +81,7 @@ def run(raw_input: dict) -> dict:
     user_msg = (
         f"Working title: {payload.title}\n"
         f"Angle: {payload.angle}\n"
+        f"Target language code: {payload.language_code}\n"
         f"Script body:\n{payload.script_body}\n\n"
         f"Real YouTube autocomplete phrases (high search intent):\n{autocomplete_block}"
     )

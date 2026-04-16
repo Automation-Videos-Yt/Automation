@@ -193,6 +193,7 @@ export type PipelineRun = {
   id: string;
   experimentId: string | null;
   niche: string;
+  languageCode: string;
   targetDurationSec: number;
   stage: PipelineStage;
   status: RunStatus;
@@ -286,19 +287,28 @@ async function handle<T>(res: Response): Promise<T> {
 export const api = {
   base: API_URL,
 
-  createRun(niche: string, durationSec: number = 75) {
+  createRun(
+    niche: string,
+    durationSec: number = 75,
+    languageCode: string = "en",
+  ) {
     return fetch(`${API_URL}/pipeline/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ niche, durationSec }),
+      body: JSON.stringify({ niche, durationSec, languageCode }),
     }).then<PipelineRun>(handle);
   },
 
-  createBatch(niche: string, count: number, durationSec: number = 75) {
+  createBatch(
+    niche: string,
+    count: number,
+    durationSec: number = 75,
+    languageCodes: string[] = ["en"],
+  ) {
     return fetch(`${API_URL}/pipeline/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ niche, count, durationSec }),
+      body: JSON.stringify({ niche, count, durationSec, languageCodes }),
     }).then<{ count: number; runs: PipelineRun[] }>(handle);
   },
 

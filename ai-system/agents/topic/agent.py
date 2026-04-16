@@ -20,6 +20,7 @@ Given a niche, pick exactly ONE highly shareable video idea that:
 - Can be delivered in 60-90 seconds of narration.
 - Has a concrete, specific angle (not generic).
 - Hooks the viewer in the first sentence with curiosity or a bold claim.
+- Write title, angle, and rationale in the requested target language code.
 
 If past topics from the same operator are supplied with performance data:
 - Lean TOWARD patterns that were tagged "strong" (high CTR, high avg view %).
@@ -84,13 +85,15 @@ def run(raw_input: dict) -> dict:
     payload = TopicInput.model_validate(raw_input)
     client = _get_client()
     log.info(
-        "niche=%s past=%d",
+        "niche=%s language=%s past=%d",
         payload.niche,
+        payload.language_code,
         len(payload.past_topics),
     )
 
     user_content = (
         f"Niche: {payload.niche}"
+        f"\nTarget language code: {payload.language_code}"
         f"{_past_block(payload)}"
         f"{_exclude_block(payload)}"
     )

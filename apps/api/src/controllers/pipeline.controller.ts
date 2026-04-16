@@ -17,7 +17,11 @@ import {
 export async function postRun(req: Request, res: Response, next: NextFunction) {
   try {
     const input = createRunSchema.parse(req.body);
-    const run = await createPipelineRun(input.niche, input.durationSec);
+    const run = await createPipelineRun(
+      input.niche,
+      input.durationSec,
+      input.languageCode,
+    );
     res.status(201).json(run);
   } catch (err) {
     next(err);
@@ -35,6 +39,7 @@ export async function postBatch(
       input.niche,
       input.count,
       input.durationSec,
+      input.languageCodes,
     );
     res.status(201).json({ count: runs.length, runs });
   } catch (err) {

@@ -132,6 +132,7 @@ type SeedHookVariantRunsInput = {
   parentRunId: string;
   experimentId: string;
   niche: string;
+  languageCode: string;
   targetDurationSec: number;
   topic: TopicOutput;
   topicEmbedding: number[];
@@ -192,6 +193,7 @@ async function maybeSeedHookVariantRuns(
           data: {
             experimentId: input.experimentId,
             niche: input.niche,
+            languageCode: input.languageCode,
             targetDurationSec: input.targetDurationSec,
             stage: "QUEUED",
             status: "QUEUED",
@@ -325,7 +327,10 @@ export async function runPipeline(runId: string): Promise<void> {
   }
   const experimentId = run.experimentId ?? run.id;
 
-  log.info({ niche: run.niche }, "pipeline start");
+  log.info(
+    { niche: run.niche, languageCode: run.languageCode },
+    "pipeline start",
+  );
   const pipelineStart = Date.now();
 
   await prisma.pipelineRun.update({
@@ -378,6 +383,7 @@ export async function runPipeline(runId: string): Promise<void> {
       for (let attempt = 1; attempt <= MAX_TOPIC_ATTEMPTS; attempt++) {
         const topicInput = {
           niche: run.niche,
+          language_code: run.languageCode,
           past_topics: pastTopics,
           exclude_titles: excludeTitles,
         };
@@ -453,6 +459,7 @@ export async function runPipeline(runId: string): Promise<void> {
         topic_title: topic.title,
         topic_angle: topic.angle,
         target_duration_sec: run.targetDurationSec,
+        language_code: run.languageCode,
       };
       script = await withAgentLog(runId, "script", scriptInput, () =>
         runAgent<typeof scriptInput, ScriptOutput>("script", scriptInput, {
@@ -509,6 +516,7 @@ export async function runPipeline(runId: string): Promise<void> {
         topic_angle: topic.angle,
         script_body: script.body,
         original_hook: script.hook,
+        language_code: run.languageCode,
         variants: env.ENABLE_HOOK_AB_TESTING ? env.HOOK_AB_VARIANTS : 3,
         past_hooks: pastHooks,
       };
@@ -553,6 +561,7 @@ export async function runPipeline(runId: string): Promise<void> {
         parentRunId: runId,
         experimentId,
         niche: run.niche,
+        languageCode: run.languageCode,
         targetDurationSec: run.targetDurationSec,
         topic,
         topicEmbedding: persistedTopic?.titleEmbedding ?? [],
@@ -677,6 +686,7 @@ export async function runPipeline(runId: string): Promise<void> {
         text: narration,
         output_path: audioPath,
         tier: voiceTier,
+        language_code: run.languageCode,
       };
       voice = await withAgentLog(runId, "voice", voiceInput, () =>
         runAgent<typeof voiceInput, VoiceOutput>("voice", voiceInput, {
@@ -805,6 +815,7 @@ export async function runPipeline(runId: string): Promise<void> {
         title: topic.title,
         angle: topic.angle,
         script_body: script.body,
+        language_code: run.languageCode,
       };
 
       // Per-scene: download (I/O) then prep (ffmpeg, CPU). Downloads can run at

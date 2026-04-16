@@ -4,7 +4,26 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { api, PipelineRun } from "../../services/api";
 
-function stageColor(stage: PipelineRun["stage"], status: PipelineRun["status"]) {
+const LANGUAGE_LABELS: Record<string, string> = {
+  en: "English",
+  es: "Spanish",
+  pt: "Portuguese",
+  fr: "French",
+  de: "German",
+  hi: "Hindi",
+  ar: "Arabic",
+  id: "Indonesian",
+  ja: "Japanese",
+};
+
+function languageLabel(code: string): string {
+  return LANGUAGE_LABELS[code] ?? code.toUpperCase();
+}
+
+function stageColor(
+  stage: PipelineRun["stage"],
+  status: PipelineRun["status"],
+) {
   if (status === "FAILED") return "text-red-400";
   if (stage === "DONE") return "text-emerald-400";
   return "text-yellow-400";
@@ -18,7 +37,8 @@ export default function RunsPage() {
   });
 
   if (isLoading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-400">{(error as Error).message}</div>;
+  if (error)
+    return <div className="text-red-400">{(error as Error).message}</div>;
 
   return (
     <div className="space-y-4">
@@ -33,7 +53,8 @@ export default function RunsPage() {
             <div>
               <div className="font-medium">{r.niche}</div>
               <div className="text-xs text-white/50">
-                {new Date(r.createdAt).toLocaleString()} · {r.id}
+                {new Date(r.createdAt).toLocaleString()} ·{" "}
+                {languageLabel(r.languageCode)} · {r.id}
               </div>
             </div>
             <div className={`text-sm ${stageColor(r.stage, r.status)}`}>

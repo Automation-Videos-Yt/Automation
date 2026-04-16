@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 class VoiceInput(BaseModel):
     text: str = Field(..., min_length=1)
     output_path: str
+    language_code: str = Field(default="en", min_length=2, max_length=10)
     voice_id: str | None = None
     # Voice tiers (cost per 1k chars, approx):
     #   elite    → ElevenLabs turbo   (~$0.18)  — reserved for manual opt-in

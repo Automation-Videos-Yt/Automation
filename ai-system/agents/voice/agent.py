@@ -71,9 +71,10 @@ def run(raw_input: dict) -> dict:
     tier = payload.tier
     chars = len(payload.text)
     log.info(
-        "tier=%s chars=%d voice_id=%s out=%s",
+        "tier=%s chars=%d lang=%s voice_id=%s out=%s",
         tier,
         chars,
+        payload.language_code,
         voice_id,
         payload.output_path,
     )

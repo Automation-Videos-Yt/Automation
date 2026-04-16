@@ -11,6 +11,22 @@ import { PredictionCard } from "../../../components/PredictionCard";
 import { AssetActions } from "../../../components/AssetActions";
 import { HookExperimentCard } from "../../../components/HookExperimentCard";
 
+const LANGUAGE_LABELS: Record<string, string> = {
+  en: "English",
+  es: "Spanish",
+  pt: "Portuguese",
+  fr: "French",
+  de: "German",
+  hi: "Hindi",
+  ar: "Arabic",
+  id: "Indonesian",
+  ja: "Japanese",
+};
+
+function languageLabel(code: string): string {
+  return LANGUAGE_LABELS[code] ?? code.toUpperCase();
+}
+
 const STAGES: PipelineRun["stage"][] = [
   "TOPIC",
   "SCRIPT",
@@ -148,6 +164,7 @@ export default function RunDetailPage() {
         <div className="text-white/50 text-sm">Run · {run.id}</div>
         <h1 className="text-2xl font-semibold mt-1">{run.niche}</h1>
         <div className="text-xs text-white/50 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>language: {languageLabel(run.languageCode)}</span>
           <span>target duration: {run.targetDurationSec}s</span>
           {run.cost && run.cost.totalUsd > 0 && (
             <span
