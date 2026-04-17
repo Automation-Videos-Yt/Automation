@@ -18,6 +18,11 @@ from .prediction_schema import (
     PredictionOutput,
     PastPerformanceContext,
 )
+from .viral_hook_schema import ViralHookInput, ViralHookOutput, TopPerformingHook
+from .retention_optimizer_schema import (
+    RetentionOptimizerInput,
+    RetentionOptimizerOutput,
+)
 
 __all__ = [
     "TopicInput",
@@ -48,4 +53,9 @@ __all__ = [
     "PredictionInput",
     "PredictionOutput",
     "PastPerformanceContext",
+    "ViralHookInput",
+    "ViralHookOutput",
+    "TopPerformingHook",
+    "RetentionOptimizerInput",
+    "RetentionOptimizerOutput",
 ]

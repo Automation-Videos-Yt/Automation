@@ -1,0 +1,103 @@
+import json
+from config import settings
+from schemas import RetentionOptimizerInput, RetentionOptimizerOutput
+from lib.log import get_logger, timed
+from lib.llm import chat_with_fallback
+
+log = get_logger("agent.retention_optimizer")
+
+
+SYSTEM_PROMPT = """You are a retention optimization expert.
+
+Goal:
+- Maximize audience retention.
+
+Improve the provided script by:
+- Removing fluff.
+- Adding pattern interrupts every 5-7 seconds.
+- Making sentences shorter.
+- Increasing curiosity flow.
+
+Constraints:
+- Maintain original meaning.
+- Keep duration similar.
+
+Output format (strict JSON):
+{
+  "improved_script": "..."
+}
+
+Return only the JSON object above.
+"""
+
+
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "retention_optimizer",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "improved_script": {"type": "string"},
+            },
+            "required": ["improved_script"],
+        },
+    },
+}
+
+
+def _word_count(text: str) -> int:
+    return len([w for w in text.split() if w])
+
+
+def run(raw_input: dict) -> dict:
+    payload = RetentionOptimizerInput.model_validate(raw_input)
+    source_words = _word_count(payload.script)
+    log.info("source_words=%d language=%s", source_words, payload.language_code)
+
+    user_msg = (
+        f"Language code: {payload.language_code}\n"
+        f"Original script word count: {source_words}\n"
+        "Original script:\n"
+        f"{payload.script}"
+    )
+
+    with timed(log, "openai.chat.completions", model=settings.openai_model_quality):
+        response = chat_with_fallback(
+            primary_model=settings.openai_model_quality,
+            fallback_model=settings.openai_model_fast,
+            temperature=0.7,
+            response_format=RESPONSE_FORMAT,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+
+    usage = getattr(response, "usage", None)
+    if usage:
+        log.info(
+            "tokens in=%s out=%s total=%s",
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+        )
+
+    data = json.loads(response.choices[0].message.content or "{}")
+    out = RetentionOptimizerOutput.model_validate(data).model_dump()
+
+    improved_words = _word_count(out["improved_script"])
+    if source_words > 0:
+        drift = abs(improved_words - source_words) / source_words
+        if drift > 0.25:
+            log.warning(
+                "duration drift higher than expected source=%d improved=%d drift=%.2f",
+                source_words,
+                improved_words,
+                drift,
+            )
+
+    log.info("improved_words=%d", improved_words)
+    return out

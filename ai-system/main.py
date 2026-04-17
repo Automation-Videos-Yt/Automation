@@ -61,7 +61,7 @@ async def embeddings(request: Request) -> dict:
 
 
 @app.post("/agents/{agent_name}/run")
-async def run_agent(agent_name: str, request: Request) -> dict:
+async def run_agent(agent_name: str, request: Request) -> object:
     try:
         payload = await request.json()
     except Exception:

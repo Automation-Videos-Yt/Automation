@@ -11,11 +11,13 @@ from agents.video_meta import run as video_meta_run
 from agents.thumbnail import run as thumbnail_run
 from agents.feedback import run as feedback_run
 from agents.prediction import run as prediction_run
+from agents.viral_hook import run as viral_hook_run
+from agents.retention_optimizer import run as retention_optimizer_run
 from lib.log import get_logger
 
 log = get_logger("orchestrator")
 
-AgentFn = Callable[[dict], dict]
+AgentFn = Callable[[dict], object]
 
 
 REGISTRY: dict[str, AgentFn] = {
@@ -29,6 +31,8 @@ REGISTRY: dict[str, AgentFn] = {
     "thumbnail": thumbnail_run,
     "feedback": feedback_run,
     "prediction": prediction_run,
+    "viral_hook": viral_hook_run,
+    "retention_optimizer": retention_optimizer_run,
 }
 
 
@@ -36,7 +40,7 @@ class AgentNotFound(Exception):
     pass
 
 
-def dispatch(agent_name: str, payload: dict) -> dict:
+def dispatch(agent_name: str, payload: dict) -> object:
     fn = REGISTRY.get(agent_name)
     if fn is None:
         log.warning("unknown agent requested: %s (registry=%s)", agent_name, list(REGISTRY))

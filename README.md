@@ -357,6 +357,78 @@ Cost query options:
 | ------ | ---------- | --------------------------------------- |
 | `GET`  | `/media/*` | Serve generated files from storage path |
 
+### AI Agent Utilities
+
+These run on the Python AI service endpoint: `POST /agents/:agentName/run`.
+
+Registry currently includes:
+
+| Agent name            | Purpose                                  | Response shape |
+| --------------------- | ---------------------------------------- | -------------- |
+| `topic`               | Topic ideation + rationale               | object         |
+| `script`              | Script generation                        | object         |
+| `hook`                | Hook variants + scoring                  | object         |
+| `prediction`          | CTR/retention prediction                 | object         |
+| `voice`               | Voice generation                         | object         |
+| `timestamp`           | Word timestamps + scenes                 | object         |
+| `video_selection`     | Scene-to-stock-video selection           | object         |
+| `video_meta`          | Title/description/tags generation        | object         |
+| `thumbnail`           | Thumbnail generation                     | object         |
+| `feedback`            | Post-run performance feedback            | object         |
+| `viral_hook`          | CTR-focused Shorts hook generation       | array          |
+| `retention_optimizer` | Script refinement for audience retention | object         |
+
+Response semantics:
+
+- The endpoint returns the raw JSON emitted by the selected agent.
+- Most agents return a JSON object.
+- `viral_hook` intentionally returns a JSON array of 3 strings.
+
+Viral hook generator (`agentName=viral_hook`) request:
+
+```json
+{
+  "topic": "AI automation for faceless Shorts",
+  "previous_hook": "Most creators waste hours editing.",
+  "top_performing_hooks_from_memory": [
+    "This one workflow tripled my Shorts output overnight",
+    {
+      "hook_text": "Nobody talks about this Shorts retention trigger",
+      "performance_tag": "strong"
+    }
+  ]
+}
+```
+
+Viral hook generator response (strict):
+
+```json
+["hook 1", "hook 2", "hook 3"]
+```
+
+Retention script optimizer (`agentName=retention_optimizer`) request:
+
+```json
+{
+  "script": "<full original script>",
+  "language_code": "en"
+}
+```
+
+Retention script optimizer response (strict):
+
+```json
+{
+  "improved_script": "..."
+}
+```
+
+Constraints enforced by the AI service schemas:
+
+- `viral_hook` output must contain exactly 3 hooks.
+- Each hook is validated to be non-empty and at most 12 words.
+- `retention_optimizer` output must include `improved_script`.
+
 ## Run and Batch Request Shapes
 
 Create run (`POST /pipeline/run`):
