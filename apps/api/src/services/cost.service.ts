@@ -492,7 +492,12 @@ function selectIterationReason(params: {
   actions: CostAction[];
   loopSignals: LoopSignals;
 }): IterationControlReason {
-  if (params.loopSignals.maxIterationsReached) return "max_iterations";
+  if (
+    params.loopSignals.maxIterationsReached &&
+    params.actions.includes("APPROVE_PIPELINE")
+  ) {
+    return "max_iterations";
+  }
   if (params.actions.includes("APPROVE_PIPELINE")) {
     return "converged";
   }
@@ -1061,7 +1066,7 @@ function normalizeAnalysisOutput(
     context.history.nicheSaturation;
 
   const forceApprove =
-    loopSignals.maxIterationsReached ||
+    (loopSignals.maxIterationsReached && !needsIntervention) ||
     shouldPreferApproval(cost, context) ||
     (loopSignals.converged && !needsIntervention);
 

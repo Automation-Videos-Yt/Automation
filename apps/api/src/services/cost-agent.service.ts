@@ -11,6 +11,7 @@ import {
   type StageResetPoint,
 } from "./pipeline.service";
 import {
+  forkAndRequeueCostAgentRun,
   getCostAgentRunCost,
   requeueCostAgentRun,
 } from "../repositories/cost-agent.repository";
@@ -30,6 +31,7 @@ export type ExecuteCostAgentActionOptions = {
 
 export type ExecuteCostAgentActionResult = {
   runId: string;
+  executedRunId: string | null;
   source: "manual" | "autopilot";
   executed: boolean;
   selectedAction: CostAction | null;
@@ -56,6 +58,7 @@ type CostAgentGraphData = {
   selectedAction: CostAction | null;
   fromStage: StageResetPoint | null;
   control: RunControlOverrides | null;
+  executedRunId: string | null;
   reason: string;
   executed: boolean;
   terminal: boolean;
@@ -67,6 +70,12 @@ const CostAgentGraphAnnotation = Annotation.Root({
 });
 
 type CostAgentGraphState = typeof CostAgentGraphAnnotation.State;
+
+function pipelineErrorCode(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+  const maybe = err as { code?: unknown };
+  return typeof maybe.code === "string" ? maybe.code : null;
+}
 
 function seedGraphState(
   runId: string,
@@ -83,6 +92,7 @@ function seedGraphState(
     selectedAction: null,
     fromStage: null,
     control: null,
+    executedRunId: null,
     reason: "",
     executed: false,
     terminal: false,
@@ -249,18 +259,39 @@ async function executeActionNode(graphState: CostAgentGraphState) {
     };
   }
 
-  await requeueCostAgentRun(
-    current.runId,
-    current.fromStage,
-    current.control ?? undefined,
-  );
+  try {
+    await requeueCostAgentRun(
+      current.runId,
+      current.fromStage,
+      current.control ?? undefined,
+    );
 
-  return {
-    state: withState(graphState, {
-      executed: true,
-      reason: "action executed and run requeued",
-    }),
-  };
+    return {
+      state: withState(graphState, {
+        executed: true,
+        executedRunId: current.runId,
+        reason: "action executed and run requeued",
+      }),
+    };
+  } catch (err) {
+    if (pipelineErrorCode(err) === "UPLOADED_LOCKED") {
+      const fork = await forkAndRequeueCostAgentRun(
+        current.runId,
+        current.fromStage,
+        current.control ?? undefined,
+      );
+
+      return {
+        state: withState(graphState, {
+          executed: true,
+          executedRunId: fork.runId,
+          reason: `source run uploaded; action executed on optimization fork ${fork.runId}`,
+        }),
+      };
+    }
+
+    throw err;
+  }
 }
 
 let compiledCostAgentGraph: ReturnType<typeof buildCostAgentGraph> | null =
@@ -302,6 +333,7 @@ export async function executeCostAgentAction(
     log.info(
       {
         runId,
+        executedRunId: finalState.executedRunId,
         source: finalState.source,
         selectedAction: finalState.selectedAction,
         fromStage: finalState.fromStage,
@@ -313,6 +345,7 @@ export async function executeCostAgentAction(
 
   return {
     runId,
+    executedRunId: finalState.executedRunId,
     source: finalState.source,
     executed: finalState.executed,
     selectedAction: finalState.selectedAction,
