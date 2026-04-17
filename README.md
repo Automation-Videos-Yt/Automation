@@ -21,6 +21,8 @@ Highlights:
 - YouTube OAuth, upload, and analytics sync
 - Topic and hook memory retrieval/admission with embeddings
 - Cost breakdown + AI decision agent with actionable optimization outcomes
+- LangGraph-orchestrated agentic execution loop for cost actions
+- Runs listing supports paginated API queries and paged UI navigation
 
 ## Architecture
 
@@ -39,7 +41,7 @@ Python AI service (8000) + OpenAI + ElevenLabs + Pexels + YouTube APIs
 Core services:
 
 - `apps/web`: Next.js 14 dashboard (React Query)
-- `apps/api`: Express API, Prisma, queue producers, OAuth, SSE relay
+- `apps/api`: Express API, Prisma, queue producers, OAuth, SSE relay, LangChain/LangGraph control runtime
 - `apps/worker`: BullMQ consumers, stage-based pipeline runner, media pipeline, upload, enrichment, cron
 - `ai-system`: FastAPI AI service exposing agent execution and embeddings
 
@@ -231,7 +233,7 @@ Behavior:
 
 ## Cost Analysis
 
-The system exposes two layers of cost intelligence for each run:
+The system exposes three layers of cost intelligence for each run:
 
 1. Deterministic cost breakdown
    - Voice
@@ -239,6 +241,14 @@ The system exposes two layers of cost intelligence for each run:
    - Thumbnail
    - Flat LLM estimate
 2. Autonomous control analysis (LangChain + heuristic fallback)
+3. Agentic execution graph (LangGraph)
+
+Execution graph flow:
+
+- Loads run context and cost analysis
+- Selects and validates the next action
+- Maps action to pipeline stage + control overrides
+- Executes requeue from the mapped stage when allowed by run/upload guards
 
 - Chooses one or more concrete actions
 - Includes confidence score
@@ -248,6 +258,9 @@ The system exposes two layers of cost intelligence for each run:
 - Includes loop control reason and learning signal output
 
 The control agent evaluates pipeline outputs, run-level costs, and historical memory/ROI signals. If LangChain is disabled or unavailable, the API returns a deterministic heuristic action plan with the same response schema.
+
+When an action is executed, the API runs a LangGraph state workflow (`loadContext -> selectAction -> mapExecution -> executeAction`).
+Both manual execution (`POST /cost/run/:id/execute`) and autopilot execution use the same graph path.
 
 Optimization objective:
 
@@ -320,17 +333,33 @@ Run detail page includes a dedicated Cost Analysis card with:
 
 ### Pipeline
 
-| Method | Path                       | Purpose                   |
-| ------ | -------------------------- | ------------------------- |
-| `POST` | `/pipeline/run`            | Create one run            |
-| `POST` | `/pipeline/batch`          | Create batch runs         |
-| `GET`  | `/pipeline`                | List runs                 |
-| `GET`  | `/pipeline/:id`            | Run detail                |
-| `GET`  | `/pipeline/:id/logs`       | Agent logs                |
-| `GET`  | `/pipeline/:id/experiment` | Hook experiment status    |
-| `POST` | `/pipeline/:id/retry`      | Retry failed run          |
-| `POST` | `/pipeline/:id/cancel`     | Cancel queued/running run |
-| `GET`  | `/pipeline/:id/stream`     | SSE events                |
+| Method | Path                       | Purpose                                  |
+| ------ | -------------------------- | ---------------------------------------- |
+| `POST` | `/pipeline/run`            | Create one run                           |
+| `POST` | `/pipeline/batch`          | Create batch runs                        |
+| `GET`  | `/pipeline`                | List runs (supports paging query params) |
+| `GET`  | `/pipeline/:id`            | Run detail                               |
+| `GET`  | `/pipeline/:id/logs`       | Agent logs                               |
+| `GET`  | `/pipeline/:id/experiment` | Hook experiment status                   |
+| `POST` | `/pipeline/:id/retry`      | Retry failed run                         |
+| `POST` | `/pipeline/:id/cancel`     | Cancel queued/running run                |
+| `GET`  | `/pipeline/:id/stream`     | SSE events                               |
+
+Pipeline list query options:
+
+- `page=<n>` and `pageSize=<1..100>` return a paginated payload:
+
+```json
+{
+  "items": [],
+  "page": 1,
+  "pageSize": 20,
+  "total": 123,
+  "totalPages": 7
+}
+```
+
+- Calling `/pipeline` without paging query params keeps backward-compatible array response behavior.
 
 ### Upload
 
@@ -367,6 +396,7 @@ Agentic execution:
 - `POST /cost/run/:id/execute` executes the selected control action by resetting the run from the mapped stage and requeueing pipeline work.
 - Request body supports optional `action` override and `forceReanalyze`.
 - If no `action` is provided, the controller executes the top recommended action.
+- Execution uses a LangGraph workflow for deterministic multi-step orchestration and consistent guard checks.
 
 ### YouTube Auth
 

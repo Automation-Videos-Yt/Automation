@@ -1,3 +1,4 @@
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { scoped } from "../lib/logger";
 import {
   getRunCost,
@@ -40,6 +41,31 @@ export type ExecuteCostAgentActionResult = {
   analysis: CostAnalysis | null;
   analysisModel: string | null;
 };
+
+type RunCostPayload = Exclude<Awaited<ReturnType<typeof getRunCost>>, null>;
+
+type CostAgentGraphData = {
+  runId: string;
+  source: "manual" | "autopilot";
+  requestedAction: CostAction | null;
+  forceReanalyze: boolean;
+  payload: RunCostPayload | null;
+  analysis: CostAnalysis | null;
+  analysisModel: string | null;
+  selectedAction: CostAction | null;
+  fromStage: StageResetPoint | null;
+  control: RunControlOverrides | null;
+  reason: string;
+  executed: boolean;
+  terminal: boolean;
+  notFound: boolean;
+};
+
+const CostAgentGraphAnnotation = Annotation.Root({
+  state: Annotation<CostAgentGraphData>,
+});
+
+type CostAgentGraphState = typeof CostAgentGraphAnnotation.State;
 
 function stageForAction(action: CostAction): StageResetPoint | null {
   switch (action) {
@@ -119,122 +145,258 @@ function buildControlOverrides(
   };
 }
 
-export async function executeCostAgentAction(
+function seedGraphState(
   runId: string,
   options?: ExecuteCostAgentActionOptions,
-): Promise<ExecuteCostAgentActionResult | null> {
-  const source = options?.source ?? "manual";
-  const payload = await getRunCost(runId, {
+): CostAgentGraphData {
+  return {
+    runId,
+    source: options?.source ?? "manual",
+    requestedAction: options?.requestedAction ?? null,
     forceReanalyze: options?.forceReanalyze ?? true,
+    payload: null,
+    analysis: null,
+    analysisModel: null,
+    selectedAction: null,
+    fromStage: null,
+    control: null,
+    reason: "",
+    executed: false,
+    terminal: false,
+    notFound: false,
+  };
+}
+
+function withState(
+  graphState: CostAgentGraphState,
+  patch: Partial<CostAgentGraphData>,
+): CostAgentGraphData {
+  return { ...graphState.state, ...patch };
+}
+
+async function loadContextNode(graphState: CostAgentGraphState) {
+  const current = graphState.state;
+  const payload = await getRunCost(current.runId, {
+    forceReanalyze: current.forceReanalyze,
   });
-  if (!payload) return null;
+
+  if (!payload) {
+    return {
+      state: withState(graphState, {
+        terminal: true,
+        notFound: true,
+        reason: "run not found",
+      }),
+    };
+  }
 
   const analysis = payload.cost.analysis;
   const analysisModel = payload.cost.analysisModel;
   if (!analysis) {
     return {
-      runId,
-      source,
-      executed: false,
-      selectedAction: null,
-      reason: "cost analysis unavailable",
-      fromStage: null,
-      control: null,
-      analysis: null,
-      analysisModel,
+      state: withState(graphState, {
+        payload,
+        analysis: null,
+        analysisModel,
+        terminal: true,
+        reason: "cost analysis unavailable",
+      }),
     };
   }
 
-  const selectedAction =
-    options?.requestedAction ?? analysis.actions[0] ?? null;
-  if (!selectedAction) {
-    return {
-      runId,
-      source,
-      executed: false,
-      selectedAction: null,
-      reason: "no action selected by controller",
-      fromStage: null,
-      control: null,
+  return {
+    state: withState(graphState, {
+      payload,
       analysis,
       analysisModel,
+    }),
+  };
+}
+
+async function selectActionNode(graphState: CostAgentGraphState) {
+  const current = graphState.state;
+  if (current.terminal) {
+    return { state: current };
+  }
+
+  const selectedAction =
+    current.requestedAction ?? current.analysis?.actions[0] ?? null;
+  if (!selectedAction) {
+    return {
+      state: withState(graphState, {
+        terminal: true,
+        reason: "no action selected by controller",
+      }),
     };
   }
 
   if (!isActionable(selectedAction)) {
     return {
-      runId,
-      source,
-      executed: false,
-      selectedAction,
-      reason: "controller approved pipeline; no execution required",
-      fromStage: null,
-      control: null,
-      analysis,
-      analysisModel,
+      state: withState(graphState, {
+        selectedAction,
+        terminal: true,
+        reason: "controller approved pipeline; no execution required",
+      }),
     };
   }
 
-  if (!analysis.iteration_control.should_continue) {
+  if (!current.analysis?.iteration_control.should_continue) {
     return {
-      runId,
-      source,
-      executed: false,
-      selectedAction,
-      reason: `controller stop condition: ${analysis.iteration_control.reason}`,
-      fromStage: null,
-      control: null,
-      analysis,
-      analysisModel,
+      state: withState(graphState, {
+        selectedAction,
+        terminal: true,
+        reason: `controller stop condition: ${current.analysis?.iteration_control.reason ?? "unknown"}`,
+      }),
     };
   }
 
-  const fromStage = stageForAction(selectedAction);
+  return {
+    state: withState(graphState, {
+      selectedAction,
+    }),
+  };
+}
+
+async function mapExecutionNode(graphState: CostAgentGraphState) {
+  const current = graphState.state;
+  if (current.terminal) {
+    return { state: current };
+  }
+
+  if (!current.selectedAction || !current.analysis || !current.payload) {
+    return {
+      state: withState(graphState, {
+        terminal: true,
+        reason: "insufficient state to map action execution",
+      }),
+    };
+  }
+
+  const fromStage = stageForAction(current.selectedAction);
   if (!fromStage) {
     return {
-      runId,
-      source,
-      executed: false,
-      selectedAction,
-      reason: "selected action has no execution stage mapping",
-      fromStage: null,
-      control: null,
-      analysis,
-      analysisModel,
+      state: withState(graphState, {
+        terminal: true,
+        reason: "selected action has no execution stage mapping",
+      }),
     };
   }
 
-  const control = buildControlOverrides(selectedAction, analysis, payload.cost);
-  if (selectedAction === "CHANGE_VOICE_TIER" && !control?.forceVoiceTier) {
+  const control = buildControlOverrides(
+    current.selectedAction,
+    current.analysis,
+    current.payload.cost,
+  );
+
+  if (
+    current.selectedAction === "CHANGE_VOICE_TIER" &&
+    !control?.forceVoiceTier
+  ) {
     return {
-      runId,
-      source,
-      executed: false,
-      selectedAction,
-      reason: "voice tier is already at target level; nothing to change",
-      fromStage,
-      control: null,
-      analysis,
-      analysisModel,
+      state: withState(graphState, {
+        fromStage,
+        control: null,
+        terminal: true,
+        reason: "voice tier is already at target level; nothing to change",
+      }),
     };
   }
 
-  await requeuePipelineRunFromStage(runId, fromStage, control ?? undefined);
-  log.info(
-    { runId, source, selectedAction, fromStage, control },
-    "cost-agent action executed",
+  return {
+    state: withState(graphState, {
+      fromStage,
+      control,
+    }),
+  };
+}
+
+async function executeActionNode(graphState: CostAgentGraphState) {
+  const current = graphState.state;
+  if (current.terminal) {
+    return { state: current };
+  }
+
+  if (!current.fromStage) {
+    return {
+      state: withState(graphState, {
+        terminal: true,
+        reason: "execution stage is missing",
+      }),
+    };
+  }
+
+  await requeuePipelineRunFromStage(
+    current.runId,
+    current.fromStage,
+    current.control ?? undefined,
   );
 
   return {
+    state: withState(graphState, {
+      executed: true,
+      reason: "action executed and run requeued",
+    }),
+  };
+}
+
+let compiledCostAgentGraph: ReturnType<typeof buildCostAgentGraph> | null =
+  null;
+
+function buildCostAgentGraph() {
+  return new StateGraph(CostAgentGraphAnnotation)
+    .addNode("loadContext", loadContextNode)
+    .addNode("selectAction", selectActionNode)
+    .addNode("mapExecution", mapExecutionNode)
+    .addNode("executeAction", executeActionNode)
+    .addEdge(START, "loadContext")
+    .addEdge("loadContext", "selectAction")
+    .addEdge("selectAction", "mapExecution")
+    .addEdge("mapExecution", "executeAction")
+    .addEdge("executeAction", END)
+    .compile();
+}
+
+function getCostAgentGraph() {
+  if (!compiledCostAgentGraph) {
+    compiledCostAgentGraph = buildCostAgentGraph();
+  }
+  return compiledCostAgentGraph;
+}
+
+export async function executeCostAgentAction(
+  runId: string,
+  options?: ExecuteCostAgentActionOptions,
+): Promise<ExecuteCostAgentActionResult | null> {
+  const output = (await getCostAgentGraph().invoke({
+    state: seedGraphState(runId, options),
+  })) as CostAgentGraphState;
+
+  const finalState = output.state;
+  if (finalState.notFound) return null;
+
+  if (finalState.executed) {
+    log.info(
+      {
+        runId,
+        source: finalState.source,
+        selectedAction: finalState.selectedAction,
+        fromStage: finalState.fromStage,
+        control: finalState.control,
+      },
+      "cost-agent action executed via langgraph",
+    );
+  }
+
+  return {
     runId,
-    source,
-    executed: true,
-    selectedAction,
-    reason: "action executed and run requeued",
-    fromStage,
-    control,
-    analysis,
-    analysisModel,
+    source: finalState.source,
+    executed: finalState.executed,
+    selectedAction: finalState.selectedAction,
+    reason: finalState.reason,
+    fromStage: finalState.fromStage,
+    control: finalState.control,
+    analysis: finalState.analysis,
+    analysisModel: finalState.analysisModel,
   };
 }
 

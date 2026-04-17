@@ -233,6 +233,14 @@ export type PipelineRun = {
   cost?: RunCost;
 };
 
+export type PipelineRunsPage = {
+  items: PipelineRun[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
 export type CostAnalysis = {
   actions: Array<
     | "APPROVE_PIPELINE"
@@ -420,6 +428,19 @@ export const api = {
     return fetch(`${API_URL}/pipeline`, { cache: "no-store" }).then<
       PipelineRun[]
     >(handle);
+  },
+
+  listRunsPaged(opts?: { page?: number; pageSize?: number }) {
+    const page = opts?.page ?? 1;
+    const pageSize = opts?.pageSize ?? 20;
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+
+    return fetch(`${API_URL}/pipeline?${query.toString()}`, {
+      cache: "no-store",
+    }).then<PipelineRunsPage>(handle);
   },
 
   getLogs(id: string) {

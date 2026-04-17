@@ -657,6 +657,42 @@ export async function listPipelineRuns(limit = 50) {
   });
 }
 
+export type PipelineRunsPage = {
+  items: Awaited<ReturnType<typeof listPipelineRuns>>;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export async function listPipelineRunsPaginated(
+  page = 1,
+  pageSize = 20,
+): Promise<PipelineRunsPage> {
+  const safePageSize = Math.max(1, Math.min(100, Math.floor(pageSize)));
+  const requestedPage = Math.max(1, Math.floor(page));
+
+  const total = await prisma.pipelineRun.count();
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  const normalizedPage = Math.min(requestedPage, totalPages);
+  const skip = (normalizedPage - 1) * safePageSize;
+
+  const items = await prisma.pipelineRun.findMany({
+    orderBy: { createdAt: "desc" },
+    skip,
+    take: safePageSize,
+    include: { video: true },
+  });
+
+  return {
+    items,
+    page: normalizedPage,
+    pageSize: safePageSize,
+    total,
+    totalPages,
+  };
+}
+
 export async function getPipelineLogs(runId: string) {
   return prisma.agentLog.findMany({
     where: { runId },

@@ -12,8 +12,17 @@ import {
   getPipelineLogs,
   getPipelineRun,
   listPipelineRuns,
+  listPipelineRunsPaginated,
   retryPipelineRun,
 } from "../services/pipeline.service";
+
+function queryString(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return undefined;
+}
 
 export async function postRun(req: Request, res: Response, next: NextFunction) {
   try {
@@ -94,11 +103,25 @@ export async function getRunExperiment(
 }
 
 export async function listRuns(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction,
 ) {
   try {
+    const pageRaw = queryString(req.query.page);
+    const pageSizeRaw = queryString(req.query.pageSize);
+    const hasPagingQuery = pageRaw != null || pageSizeRaw != null;
+
+    if (hasPagingQuery) {
+      const parsedPage = Number(pageRaw ?? "1");
+      const parsedPageSize = Number(pageSizeRaw ?? "20");
+      const page = Number.isFinite(parsedPage) ? parsedPage : 1;
+      const pageSize = Number.isFinite(parsedPageSize) ? parsedPageSize : 20;
+      const runs = await listPipelineRunsPaginated(page, pageSize);
+      res.json(runs);
+      return;
+    }
+
     const runs = await listPipelineRuns();
     res.json(runs);
   } catch (err) {

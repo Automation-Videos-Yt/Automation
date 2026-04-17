@@ -62,7 +62,7 @@ export default function HomePage() {
     enableTimestamp: true,
     enableSubtitles: true,
     enableThumbnail: true,
-    enableHookVariants: true,
+    enableHookVariants: false,
   });
   const router = useRouter();
 

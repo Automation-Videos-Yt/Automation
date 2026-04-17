@@ -13,6 +13,7 @@
     "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
+    "@langchain/langgraph": "^1.2.9",
     "@langchain/openai": "^1.4.4",
     "@prisma/client": "^5.22.0",
     "bullmq": "^5.34.0",
