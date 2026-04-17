@@ -1068,7 +1068,7 @@ export async function runPipeline(
         await generateSrtFromWords({
           words: ts.words,
           outputPath: srtPath,
-          wordsPerCue: 5,
+          transcriptText: narration,
         });
         log.debug({ srtPath, words: ts.words.length }, "subtitles written");
       } else {

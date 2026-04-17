@@ -15,6 +15,7 @@ Highlights:
 - Multi-language run generation and batch creation
 - Hook variants with optional A/B experiment flows
 - Prediction-driven voice and thumbnail tiering
+- Sentence-aware subtitle segmentation from word-level timestamps
 - Resume-from-last-success retries using cached artifacts
 - Real-time run updates via SSE
 - YouTube OAuth, upload, and analytics sync
@@ -121,7 +122,7 @@ npm run -w apps/web build
 | `HOOK`            | `hook`                | Variants + scoring + chosen hook                           |
 | `PREDICTION`      | `prediction`          | Predicts CTR/retention score; advisory fallback on failure |
 | `VOICE`           | `voice`               | Tier chosen from prediction score                          |
-| `TIMESTAMP`       | `timestamp`           | Whisper word timings + scene segmentation                  |
+| `TIMESTAMP`       | `timestamp`           | Whisper word timings + scene segmentation (subtitle input) |
 | `VIDEO_SELECTION` | `video_selection`     | Scene-intelligence + Pexels candidate ranking              |
 | `VIDEO`           | `video_meta` + ffmpeg | SEO metadata + clip download/prep + final composition      |
 | `THUMBNAIL`       | `thumbnail`           | Feature-flagged image generation                           |
@@ -132,6 +133,68 @@ Notes:
 - Stage outputs are persisted and reused on retry.
 - Prediction can fail without blocking pipeline completion (neutral fallback values used).
 - Thumbnail failure is non-fatal.
+
+## Subtitle Segmentation and Timing
+
+When `enableSubtitles=true`, language is English, and Whisper returns word timestamps,
+the worker converts raw word-level spans into subtitle segments that prioritize
+readability and natural rhythm.
+
+Segmentation priority (applied in order):
+
+1. Sentence boundary
+2. Time gap (`> 0.5s`)
+3. Max words per subtitle
+4. Duration limits
+
+Readability and timing rules:
+
+- 3 to 8 words per subtitle target
+- Up to 2 lines per subtitle (line-break aware formatting)
+- Minimum subtitle duration: `1.0s`
+- Maximum subtitle duration: `3.0s`
+- Semantic splitting preference (avoid cutting around connectors)
+
+Strict guarantees:
+
+- No overlapping subtitle timestamps
+- Chronological order maintained
+- No skipped words
+- Every word included exactly once
+
+Refinement behavior for already segmented subtitles:
+
+- Detects internal sentence-boundary mistakes and splits where needed
+- Fixes boundary "bleeding words" between adjacent subtitles
+- Applies minimal boundary timing shifts (up to `0.2s`) for smoother flow
+- Preserves exact word order/count (no dropped or duplicated words)
+
+Input shape (word-level timestamps):
+
+```json
+[
+  { "word": "Hello", "start": 0.0, "end": 0.4 },
+  { "word": "everyone", "start": 0.4, "end": 0.9 },
+  { "word": "today", "start": 0.9, "end": 1.2 }
+]
+```
+
+Segment output shape (JSON-friendly):
+
+```json
+[
+  {
+    "text": "Hello everyone today",
+    "start": 0.0,
+    "end": 1.3
+  }
+]
+```
+
+Implementation references:
+
+- `apps/worker/src/media/subtitles.ts` (`segmentWordTimestamps`, `generateSrtFromWords`)
+- `apps/worker/src/pipeline-runner.ts` (subtitle generation call site)
 
 ## Memory and Dedup
 
