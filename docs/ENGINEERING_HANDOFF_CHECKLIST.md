@@ -20,7 +20,7 @@ This document focuses on:
 | -------------------- | ---------------- | --------------- | ------------------------------------------------------------------------------------------------------------- |
 | Web dashboard        | Frontend         | Full-stack      | apps/web/app, apps/web/components, apps/web/services/api.ts                                                   |
 | API control plane    | Backend          | Full-stack      | apps/api/src/app.ts, apps/api/src/routes, apps/api/src/controllers, apps/api/src/services                     |
-| Worker execution     | Backend/Platform | Media engineer  | apps/worker/src/pipeline-runner.ts, apps/worker/src/media, apps/worker/src/upload, apps/worker/src/enrichment |
+| Worker execution     | Backend/Platform | Media engineer  | apps/worker/src/pipeline-runner.ts, apps/worker/src/stages, apps/worker/src/media, apps/worker/src/upload, apps/worker/src/enrichment |
 | AI agent runtime     | ML/AI engineer   | Backend         | ai-system/main.py, ai-system/orchestrator/agent_runner.py, ai-system/agents, ai-system/schemas                |
 | Data model           | Backend          | Platform        | apps/api/prisma/schema.prisma                                                                                 |
 | Infra and containers | Platform         | Backend         | docker-compose.yml, infrastructure/docker                                                                     |
@@ -30,7 +30,7 @@ This document focuses on:
 
 | Capability                        | Status  | Evidence                                                                                    |
 | --------------------------------- | ------- | ------------------------------------------------------------------------------------------- |
-| End-to-end generation pipeline    | Done    | apps/worker/src/pipeline-runner.ts                                                          |
+| End-to-end generation pipeline    | Done    | apps/worker/src/pipeline-runner.ts, apps/worker/src/stages/index.ts                         |
 | Queue-based execution and retries | Done    | apps/api/src/queues, apps/worker/src/index.ts                                               |
 | Live run updates (SSE)            | Done    | apps/api/src/events/bus.ts, apps/api/src/controllers/events.controller.ts                   |
 | YouTube OAuth and upload          | Done    | apps/api/src/controllers/youtube.controller.ts, apps/worker/src/upload/upload-runner.ts     |
@@ -39,9 +39,9 @@ This document focuses on:
 | Cost analysis and recommendations | Done    | apps/api/src/services/cost.service.ts, apps/web/components/CostAnalysisCard.tsx             |
 | Channel analytics dashboard       | Done    | apps/web/app/analytics/page.tsx                                                             |
 | CI checks                         | Done    | .github/workflows/ci.yml                                                                    |
+| Worker stage modularization       | Done    | apps/worker/src/stages                                                                      |
 | Test suite (unit/integration)     | Pending | No test files in apps/api, apps/worker, apps/web                                            |
 | Tracked DB migrations             | Pending | No apps/api/prisma/migrations directory                                                     |
-| Worker stage modularization       | Pending | apps/worker/src/stages is empty                                                             |
 
 ## 4. Release Readiness Checklist
 
@@ -125,9 +125,9 @@ This document focuses on:
 
 ### P1
 
-1. Split apps/worker/src/pipeline-runner.ts into stage modules under apps/worker/src/stages.
-2. Improve multilingual timestamp/subtitle path.
-3. Improve fallback observability when placeholder media is used.
+1. Improve multilingual timestamp/subtitle path.
+2. Improve fallback observability when placeholder media is used.
+3. Prevent apps/worker/src/stages/helpers.ts from becoming a new orchestration bottleneck by keeping stage logic local.
 
 ### P2
 
@@ -138,7 +138,7 @@ This document focuses on:
 
 | Risk                       | Impact                                     | Mitigation                                            |
 | -------------------------- | ------------------------------------------ | ----------------------------------------------------- |
-| Monolithic pipeline-runner | Slower change velocity and harder testing  | Stage modularization and stage-level tests            |
+| Sparse stage-level tests   | Regression risk in orchestration behavior  | Add stage-focused automated coverage                  |
 | No tracked migrations      | Risky schema evolution across environments | Introduce prisma migration workflow                   |
 | Sparse automated tests     | Regression risk                            | Add unit/integration coverage for critical flows      |
 | Placeholder media fallback | Possible output quality drop               | Improve clip retrieval strategy + operator visibility |

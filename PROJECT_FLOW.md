@@ -85,9 +85,25 @@ Frontend consumes via: `GET /pipeline/:id/stream` (SSE).
    2. enqueues `videoQueue` job (`attempts=3`, exponential backoff).
 5. Web navigates to `/runs/:id` and opens SSE stream.
 
-## 3.3 Video Pipeline Flow (`apps/worker/src/pipeline-runner.ts`)
+## 3.3 Video Pipeline Flow (`apps/worker/src/pipeline-runner.ts` + `apps/worker/src/stages/*`)
 
-`runPipeline(runId)` stage order:
+`runPipeline(runId)` is now an orchestration shell, not a monolithic stage implementation.
+
+Execution model:
+
+1. loads the run and normalizes feature flags
+2. builds a shared `StageContext`
+3. emits `QUEUED -> STARTED`
+4. iterates `PIPELINE_STAGES`
+5. for each stage:
+   1. optionally skips via `shouldSkip`
+   2. emits `STARTED`
+   3. executes stage-local cache/persist/agent/media logic
+   4. emits `COMPLETED` or `FAILED`
+6. marks run `DONE` or `FAILED`
+7. optionally auto-enqueues upload.
+
+`PIPELINE_STAGES` order:
 
 1. `TOPIC`
 2. `SCRIPT`
@@ -104,9 +120,32 @@ If any fatal error occurs: pipeline marks run `FAILED`.
 
 Core behavior details:
 
-1. Every stage transition updates DB and publishes `stage` event.
-2. Every agent call is wrapped with `withAgentLog` to persist input/output/duration/status.
-3. Resume cache is used aggressively (`apps/worker/src/cache/cache-resume.ts`).
+1. The runner is stage-registry driven (`apps/worker/src/stages/index.ts`).
+2. Every stage transition updates DB and publishes `stage` events with `STARTED`, `COMPLETED`, or `FAILED`.
+3. Every agent call is wrapped with `withAgentLog` to persist input/output/duration/status.
+4. Resume cache is used aggressively (`apps/worker/src/cache/cache-resume.ts`).
+5. Stage outputs are shared through `StageContext.cache` so downstream stages do not reread or recompute unnecessarily.
+6. Stage failures are isolated; completed stage artifacts remain available for retry.
+
+Worker stage module layout:
+
+1. `apps/worker/src/stages/types.ts`
+   1. `PipelineStage`, `StageContext`, `StageResult`, shared output types.
+2. `apps/worker/src/stages/helpers.ts`
+   1. cancellation guards
+   2. run/cache loaders
+   3. stage event helpers
+   4. shared agent-log wrapper
+   5. A/B hook seed helper.
+3. `apps/worker/src/stages/topic.stage.ts`
+4. `apps/worker/src/stages/script.stage.ts`
+5. `apps/worker/src/stages/hook.stage.ts`
+6. `apps/worker/src/stages/prediction.stage.ts`
+7. `apps/worker/src/stages/voice.stage.ts`
+8. `apps/worker/src/stages/timestamp.stage.ts`
+9. `apps/worker/src/stages/videoSelection.stage.ts`
+10. `apps/worker/src/stages/video.stage.ts`
+11. `apps/worker/src/stages/thumbnail.stage.ts`
 
 Stage-by-stage:
 
@@ -131,8 +170,9 @@ Stage-by-stage:
    2. calls AI `voice` agent
    3. persists `VoiceAsset`.
 6. TIMESTAMP
-   1. calls AI `timestamp` agent (Whisper word timings)
-   2. dynamic scene target (`4s` if short run else `7.5s`).
+   1. if timestamps are disabled or run language is non-English, builds fallback narration scenes
+   2. otherwise calls AI `timestamp` agent (Whisper word timings)
+   3. dynamic scene target (`4s` if short run else `7.5s`).
 7. VIDEO_SELECTION
    1. calls AI `video_selection` agent (query generation + Pexels lookup)
    2. persists `Scene[]`.
@@ -151,6 +191,27 @@ Stage-by-stage:
 10. DONE
 11. marks run `status=COMPLETED`, `stage=DONE`
 12. publishes completion event.
+
+Per-stage execution contract:
+
+1. `startStage(...)`
+   1. verifies run not cancelled
+   2. updates `PipelineRun.stage`
+   3. sets `currentAgent`
+   4. logs `Stage started`
+   5. emits `STARTED`.
+2. Stage `execute(...)`
+   1. checks cache or filesystem where applicable
+   2. runs the stage-specific logic only if needed
+   3. persists outputs
+   4. stores normalized output into `StageContext.cache`.
+3. `completeStage(...)`
+   1. logs completion
+   2. emits `COMPLETED`.
+4. `onError(...)`
+   1. logs failure
+   2. emits `FAILED`
+   3. leaves prior stage artifacts intact for retry.
 
 ## 3.4 Upload Flow
 
@@ -381,14 +442,31 @@ Files:
 
 | File                                    | Responsibility                                          |
 | --------------------------------------- | ------------------------------------------------------- |
-| `apps/worker/src/pipeline-runner.ts`    | Main generation orchestrator (all stages).              |
+| `apps/worker/src/pipeline-runner.ts`    | Pipeline orchestrator over modular stage registry.      |
 | `apps/worker/src/cache/cache-resume.ts` | Stage cache loaders (DB + filesystem existence checks). |
 | `apps/worker/src/clients/aiClient.ts`   | HTTP client to AI service with retry policy.            |
 | `apps/worker/src/lib/concurrency.ts`    | Local pLimit implementation.                            |
 | `apps/worker/src/lib/logger.ts`         | Worker logger and run-scoped log tags.                  |
 | `apps/worker/src/events/publisher.ts`   | Redis event publisher for run events.                   |
 
-### 4.6.3 Media processing
+### 4.6.3 Pipeline stage system
+
+| File                                              | Responsibility                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| `apps/worker/src/stages/types.ts`                 | Shared stage contracts, context type, and stage output shapes.   |
+| `apps/worker/src/stages/helpers.ts`               | Shared stage helpers for cache loading, events, logging, cancel. |
+| `apps/worker/src/stages/index.ts`                 | Ordered `PIPELINE_STAGES` registry.                              |
+| `apps/worker/src/stages/topic.stage.ts`           | Topic generation + duplicate-topic retry + persistence.          |
+| `apps/worker/src/stages/script.stage.ts`          | Script generation + persistence.                                 |
+| `apps/worker/src/stages/hook.stage.ts`            | Hook variants, chosen hook persistence, A/B child-run seeding.   |
+| `apps/worker/src/stages/prediction.stage.ts`      | Prediction generation with advisory fallback.                    |
+| `apps/worker/src/stages/voice.stage.ts`           | Voice tier selection, TTS generation, audio persistence.         |
+| `apps/worker/src/stages/timestamp.stage.ts`       | Whisper timestamps or fallback scene construction.               |
+| `apps/worker/src/stages/videoSelection.stage.ts`  | Scene selection + clip metadata persistence.                     |
+| `apps/worker/src/stages/video.stage.ts`           | SEO meta, clip pipeline, subtitle generation, final composition. |
+| `apps/worker/src/stages/thumbnail.stage.ts`       | Optional thumbnail generation and DB update.                     |
+
+### 4.6.4 Media processing
 
 | File                                    | Responsibility                                    |
 | --------------------------------------- | ------------------------------------------------- |
@@ -397,7 +475,7 @@ Files:
 | `apps/worker/src/media/subtitles.ts`    | SRT generation (word-based and fallback).         |
 | `apps/worker/src/media/compose.ts`      | Final ffmpeg concat + audio/subtitle mux.         |
 
-### 4.6.4 Upload + analytics + enrichment
+### 4.6.5 Upload + analytics + enrichment
 
 | File                                              | Responsibility                                                |
 | ------------------------------------------------- | ------------------------------------------------------------- |
@@ -406,7 +484,7 @@ Files:
 | `apps/worker/src/upload/youtubeAnalytics.ts`      | YouTube Analytics snapshot fetcher.                           |
 | `apps/worker/src/enrichment/enrichment-runner.ts` | Analytics persistence + feedback + memory admission workflow. |
 
-### 4.6.5 Memory subsystem
+### 4.6.6 Memory subsystem
 
 | File                                    | Responsibility                                                                  |
 | --------------------------------------- | ------------------------------------------------------------------------------- |
@@ -493,8 +571,9 @@ Retry behavior:
 4. Voice provider fallback (ElevenLabs to OpenAI for elite path).
 5. Prediction is advisory and non-blocking.
 6. Thumbnail generation is feature-flagged and non-fatal.
-7. Download/prep parallelization with bounded concurrency.
-8. SSE push updates + fallback polling in UI.
+7. Stage-based execution preserves partial outputs for resume and retry.
+8. Download/prep parallelization with bounded concurrency.
+9. SSE push updates + fallback polling in UI.
 
 ## 7. Environment and Secrets Handling Notes
 
@@ -508,7 +587,7 @@ Retry behavior:
 When you click Start Run:
 
 1. API creates `PipelineRun` and queue job.
-2. Worker runs all generation stages with cache-aware resume.
+2. Worker builds `StageContext` and runs the registered stages with cache-aware resume.
 3. AI service executes specialized agent tasks.
 4. Worker emits stage events.
 5. UI updates live via SSE.

@@ -79,16 +79,16 @@ Business value:
 | ----------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | apps/web    | Operator dashboard for run creation, monitoring, upload, analytics, and cost review.              | Enables non-engineering workflow for pipeline operation. |
 | apps/api    | API gateway, orchestration endpoints, OAuth endpoints, queue producers, SSE relay.                | Central control plane for all lifecycle actions.         |
-| apps/worker | Heavy execution engine: pipeline generation, media processing, upload, enrichment.                | Converts requests into final publishable assets.         |
+| apps/worker | Heavy execution engine: modular stage-based pipeline generation, media processing, upload, enrichment. | Converts requests into final publishable assets.         |
 | ai-system   | Agent runtime for topic/script/hook/prediction/voice/timestamp/selection/meta/thumbnail/feedback. | Provides intelligence layer and creative generation.     |
 
 ## 4. Current Constraints (Non-Blocking But Important)
 
-- Worker pipeline logic is centralized in one large runner file (higher maintenance cost).
 - No tracked Prisma migrations yet (runtime schema sync is used).
 - No dedicated automated test suite yet (smoke flow exists).
 - Non-English runs currently skip timestamp+subtitle path and use fallback segmentation.
 - Stock clip fallback placeholders can reduce visual quality in low-match scenarios.
+- Shared stage helpers now carry most cross-stage behavior and should be kept from becoming a new monolith.
 
 ## 5. Readiness Assessment
 
@@ -104,15 +104,15 @@ Before broad scale rollout, prioritize:
 
 - Formal automated tests,
 - migration discipline,
-- modularization of worker stages,
-- and stronger secret/key management controls.
+- stronger secret/key management controls,
+- and continued discipline around stage-level ownership boundaries.
 
 ## 6. 30-60-90 Day Business Priorities
 
 ### Next 30 days
 
 - Stabilize reliability metrics (failure rate, retry rate, average run completion time).
-- Add baseline automated tests around core API and worker paths.
+- Add baseline automated tests around core API and worker stage paths.
 
 ### Next 60 days
 

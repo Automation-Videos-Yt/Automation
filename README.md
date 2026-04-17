@@ -40,7 +40,7 @@ Core services:
 
 - `apps/web`: Next.js 14 dashboard (React Query)
 - `apps/api`: Express API, Prisma, queue producers, OAuth, SSE relay
-- `apps/worker`: BullMQ consumers, media pipeline, upload, enrichment, cron
+- `apps/worker`: BullMQ consumers, stage-based pipeline runner, media pipeline, upload, enrichment, cron
 - `ai-system`: FastAPI AI service exposing agent execution and embeddings
 
 ## Monorepo Layout
@@ -50,6 +50,7 @@ apps/
   api/      Express + Prisma + queues + OAuth + SSE
   web/      Next.js dashboard
   worker/   BullMQ workers (video/upload/enrichment)
+            src/stages/ modular pipeline stage system
 ai-system/  FastAPI agent runtime
 infrastructure/docker/
 scripts/
@@ -115,6 +116,10 @@ npm run -w apps/web build
 
 ## Pipeline Details
 
+Pipeline execution is stage-based. `apps/worker/src/pipeline-runner.ts` builds a shared
+`StageContext`, iterates `PIPELINE_STAGES`, and lets each stage own its own cache resume,
+DB persistence, logging, and event emission.
+
 | Stage             | Agent / Logic         | Notes                                                      |
 | ----------------- | --------------------- | ---------------------------------------------------------- |
 | `TOPIC`           | `topic`               | Uses past topic memory and duplicate-topic retries         |
@@ -130,9 +135,23 @@ npm run -w apps/web build
 
 Notes:
 
+- Core stages live under `apps/worker/src/stages/*.stage.ts`.
+- Each stage emits `STARTED`, `COMPLETED`, and `FAILED` events.
 - Stage outputs are persisted and reused on retry.
 - Prediction can fail without blocking pipeline completion (neutral fallback values used).
 - Thumbnail failure is non-fatal.
+
+Current stage registry order:
+
+1. `topicStage`
+2. `scriptStage`
+3. `hookStage`
+4. `predictionStage`
+5. `voiceStage`
+6. `timestampStage`
+7. `videoSelectionStage`
+8. `videoStage`
+9. `thumbnailStage`
 
 ## Subtitle Segmentation and Timing
 
@@ -194,7 +213,7 @@ Segment output shape (JSON-friendly):
 Implementation references:
 
 - `apps/worker/src/media/subtitles.ts` (`segmentWordTimestamps`, `generateSrtFromWords`)
-- `apps/worker/src/pipeline-runner.ts` (subtitle generation call site)
+- `apps/worker/src/stages/video.stage.ts` (subtitle generation call site)
 
 ## Memory and Dedup
 
@@ -540,6 +559,7 @@ docker compose --profile split-workers up -d --scale worker-video=2 worker-video
 - SSE keeps frontend in sync with worker state transitions.
 - Cancellation is cooperative and updates DB + queue state.
 - Retry uses persisted artifacts to avoid recomputing completed stages.
+- Stage failures are isolated so partial outputs remain usable for retry.
 
 ## YouTube Prerequisites
 

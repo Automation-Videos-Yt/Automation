@@ -37,6 +37,7 @@ Implemented flow:
 Status: Implemented
 
 - Pipeline queue creation and orchestration via BullMQ.
+- Stage-based execution via ordered registry in `apps/worker/src/stages`.
 - Stage transitions persisted in DB and streamed to frontend via Redis pub/sub + SSE.
 - Retry from last success using persisted artifacts and cache-resume loaders.
 - User cancellation support (queued removal + cooperative stop handling).
@@ -44,6 +45,7 @@ Status: Implemented
 Evidence:
 
 - apps/worker/src/pipeline-runner.ts
+- apps/worker/src/stages/index.ts
 - apps/api/src/services/pipeline.service.ts
 - apps/api/src/events/bus.ts
 - apps/worker/src/events/publisher.ts
@@ -91,7 +93,7 @@ Status: Implemented with guardrails
 Evidence:
 
 - apps/worker/src/media/subtitles.ts
-- apps/worker/src/pipeline-runner.ts
+- apps/worker/src/stages/video.stage.ts
 
 ### 3.5 YouTube OAuth + Upload + Analytics
 
@@ -137,7 +139,8 @@ Status: Implemented
 
 Evidence:
 
-- apps/worker/src/pipeline-runner.ts
+- apps/worker/src/stages/hook.stage.ts
+- apps/worker/src/stages/helpers.ts
 - apps/api/src/services/pipeline.service.ts
 - apps/web/components/HookExperimentCard.tsx
 
@@ -190,7 +193,7 @@ Evidence:
 
 ### 4.1 Notable constraints
 
-- apps/worker/src/stages is empty; stage logic is centralized in one large pipeline runner.
+- Stage execution is modularized, but shared stage helpers now carry most cross-stage behavior.
 - No Prisma migrations folder; runtime uses prisma db push in compose command.
 - No dedicated unit/integration test suites in source folders; smoke.sh exists for flow-level smoke tests.
 - Non-English runs currently skip timestamp/subtitle path and use fallback scene segmentation.
@@ -304,7 +307,7 @@ Evidence:
 | apps/worker/src/integrations/youtube/client.ts  | Worker-side authed youtube client + token rotation persistence + analytics cell parsing.                         | Implemented |
 | apps/worker/src/cache/cache-resume.ts           | Stage artifact loaders (topic/script/hook/prediction/voice/timestamp/video_selection/meta/final video).          | Implemented |
 | apps/worker/src/memory/vectorStore.ts           | embeddings, cosine similarity, topic dedup, memory retrieval/admission, hook admission.                          | Implemented |
-| apps/worker/src/pipeline-runner.ts              | Main pipeline orchestration, stage transitions, A/B seeding, media synthesis, final completion/failure handling. | Implemented |
+| apps/worker/src/pipeline-runner.ts              | Main pipeline orchestration shell over stage registry, run lifecycle handling, final completion/failure handling. | Implemented |
 | apps/worker/src/media/subtitles.ts              | word-span segmentation/refinement and SRT generation utilities.                                                  | Implemented |
 | apps/worker/src/media/clipDownload.ts           | streaming stock clip downloader to local file.                                                                   | Implemented |
 | apps/worker/src/media/clipPrep.ts               | ffmpeg per-scene clip prep and placeholder render path.                                                          | Implemented |
@@ -315,11 +318,22 @@ Evidence:
 | apps/worker/src/upload/auto-upload.ts           | auto-upload enqueue/reset logic for completed runs.                                                              | Implemented |
 | apps/worker/src/enrichment/enrichment-runner.ts | analytics snapshot persist, feedback generation, topic/hook memory admission.                                    | Implemented |
 
-### 5.5.3 Additional worker folders
+### 5.5.3 apps/worker/src/stages
 
-| Path                   | Responsibility                                  | State             |
-| ---------------------- | ----------------------------------------------- | ----------------- |
-| apps/worker/src/stages | Intended modular stage folder; currently empty. | Placeholder/empty |
+| File                                           | Responsibility                                                                       | State       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------ | ----------- |
+| apps/worker/src/stages/types.ts                | Shared stage interfaces, context/result types, and normalized stage output types.   | Implemented |
+| apps/worker/src/stages/helpers.ts              | Shared stage helpers for cancellation checks, event emission, cache hydration, and agent logging. | Implemented |
+| apps/worker/src/stages/index.ts                | Ordered pipeline stage registry.                                                     | Implemented |
+| apps/worker/src/stages/topic.stage.ts          | Topic generation, duplicate-topic retries, and topic persistence.                    | Implemented |
+| apps/worker/src/stages/script.stage.ts         | Script generation and persistence.                                                   | Implemented |
+| apps/worker/src/stages/hook.stage.ts           | Hook variant generation, chosen hook persistence, and A/B child-run seeding.         | Implemented |
+| apps/worker/src/stages/prediction.stage.ts     | Prediction generation with advisory neutral fallback.                                | Implemented |
+| apps/worker/src/stages/voice.stage.ts          | Voice tier selection, audio generation, and voice asset persistence.                 | Implemented |
+| apps/worker/src/stages/timestamp.stage.ts      | Whisper timestamps or fallback scene generation based on run/language settings.      | Implemented |
+| apps/worker/src/stages/videoSelection.stage.ts | Visual clip selection and scene persistence.                                         | Implemented |
+| apps/worker/src/stages/video.stage.ts          | Video metadata generation, clip pipeline orchestration, subtitle generation, and final composition. | Implemented |
+| apps/worker/src/stages/thumbnail.stage.ts      | Optional thumbnail generation and thumbnail path persistence.                         | Implemented |
 
 ## 5.6 apps/web
 
@@ -458,19 +472,19 @@ Evidence:
 | Topic and hook memory loop                                  | Done                                                             |
 | Cost analysis and optimization recommendations              | Done (LLM optional, heuristic fallback present)                  |
 | A/B hook experiment creation and scoring                    | Done                                                             |
+| Modularized worker stage handlers in apps/worker/src/stages | Done                                                             |
 | Unit/integration test suite                                 | Not done (no test files in source modules)                       |
-| Modularized worker stage handlers in apps/worker/src/stages | Not done (folder exists but empty)                               |
 | Prisma migration history in repository                      | Not done (no migrations folder; db push used in compose command) |
 
 ## 7. Practical Notes for Future Work
 
 Recommended hardening priorities:
 
-1. Break pipeline-runner.ts into stage modules under apps/worker/src/stages.
-2. Add automated tests for API services, worker stages, and critical web flows.
-3. Move from prisma db push workflow to tracked migrations for safer production evolution.
-4. Add stronger config validation for feature-flag combinations.
-5. Consider encrypting persisted YouTube token material at rest.
+1. Add automated tests for API services, worker stages, and critical web flows.
+2. Move from prisma db push workflow to tracked migrations for safer production evolution.
+3. Add stronger config validation for feature-flag combinations.
+4. Consider encrypting persisted YouTube token material at rest.
+5. Keep stage helper boundaries disciplined so stage-local logic does not re-centralize over time.
 
 ---
 
