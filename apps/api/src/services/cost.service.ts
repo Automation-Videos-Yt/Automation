@@ -74,8 +74,10 @@ const NORMALIZED_COST_CAP_USD = 0.2;
 const MIN_REWARD_IMPROVEMENT_PCT = 0.02;
 const CTR_ACTION_THRESHOLD = 0.5;
 const RETENTION_ACTION_THRESHOLD = 0.45;
+const PREDICTION_ACTION_THRESHOLD = 0.55;
 const APPROVAL_CTR_THRESHOLD = 0.55;
 const APPROVAL_RETENTION_THRESHOLD = 0.5;
+const APPROVAL_PREDICTION_THRESHOLD = 0.65;
 const APPROVAL_COST_THRESHOLD = 0.4;
 
 export type CostAction = (typeof COST_ACTIONS)[number];
@@ -128,6 +130,7 @@ const COST_ANALYSIS_PROMPT = ChatPromptTemplate.fromMessages([
       "Use prediction scores (0..1), current cost, current assets, and memory patterns to decide actions.",
       "You may return one or multiple actions when they are complementary.",
       "Policy guidance: if CTR<0.5 prioritize hook; if retention<0.45 prioritize script; if both weak change topic.",
+      "If prediction score is below 5.5/10, avoid APPROVE_PIPELINE and prioritize hook/script/topic interventions.",
       "Conservative policy: if CTR>=0.55 and retention>=0.5 and normalized_cost<0.4, prefer APPROVE_PIPELINE.",
       "If cost is high and performance is weak, prefer cost-down actions (voice downgrade, skip thumbnail).",
       "If performance is strong and ROI supports it, quality upgrades are acceptable.",
@@ -491,6 +494,25 @@ function normalizeCost(totalUsd: number): number {
   return Math.max(0, Math.min(1, totalUsd / NORMALIZED_COST_CAP_USD));
 }
 
+function normalizedPredictionQuality(context: CostDecisionContext): number {
+  const modelScore =
+    context.pipeline.predictionScore == null
+      ? null
+      : normalizeScore(context.pipeline.predictionScore / 10);
+  if (modelScore != null) return modelScore;
+
+  const ctrScore =
+    context.pipeline.ctrScore ??
+    normalizeScore((context.history.avgCtr ?? 4) / 10) ??
+    0.4;
+  const retentionScore =
+    context.pipeline.retentionScore ??
+    normalizeScore((context.history.avgRetention ?? 50) / 100) ??
+    0.5;
+
+  return normalizeScore(ctrScore * 0.55 + retentionScore * 0.45) ?? 0.45;
+}
+
 function shouldPreferApproval(
   cost: CostSnapshot,
   context: CostDecisionContext,
@@ -508,8 +530,44 @@ function shouldPreferApproval(
     ctrScore >= APPROVAL_CTR_THRESHOLD &&
     retentionScore >= APPROVAL_RETENTION_THRESHOLD;
   const lowCost = normalizeCost(cost.totalUsd) < APPROVAL_COST_THRESHOLD;
+  const strongPrediction =
+    normalizedPredictionQuality(context) >= APPROVAL_PREDICTION_THRESHOLD;
 
-  return neutralOrBetter && lowCost && !context.history.nicheSaturation;
+  return (
+    neutralOrBetter &&
+    strongPrediction &&
+    lowCost &&
+    !context.history.nicheSaturation
+  );
+}
+
+function buildInterventionActions(context: CostDecisionContext): CostAction[] {
+  const ctrScore =
+    context.pipeline.ctrScore ??
+    normalizeScore((context.history.avgCtr ?? 4) / 10) ??
+    0.4;
+  const retentionScore =
+    context.pipeline.retentionScore ??
+    normalizeScore((context.history.avgRetention ?? 50) / 100) ??
+    0.5;
+  const predictionQuality = normalizedPredictionQuality(context);
+
+  if (
+    ctrScore <= CTR_ACTION_THRESHOLD &&
+    retentionScore <= RETENTION_ACTION_THRESHOLD
+  ) {
+    return ["CHANGE_TOPIC"];
+  }
+  if (ctrScore <= CTR_ACTION_THRESHOLD) {
+    return ["REGENERATE_HOOK"];
+  }
+  if (retentionScore <= RETENTION_ACTION_THRESHOLD) {
+    return ["MODIFY_SCRIPT"];
+  }
+  if (predictionQuality < PREDICTION_ACTION_THRESHOLD) {
+    return ["REGENERATE_HOOK"];
+  }
+  return ["MODIFY_SCRIPT"];
 }
 
 function summarizeScript(
@@ -582,10 +640,7 @@ function selectIterationReason(params: {
   loopSignals: LoopSignals;
 }): IterationControlReason {
   if (params.loopSignals.maxIterationsReached) return "max_iterations";
-  if (
-    params.actions.includes("APPROVE_PIPELINE") ||
-    params.loopSignals.converged
-  ) {
+  if (params.actions.includes("APPROVE_PIPELINE")) {
     return "converged";
   }
   return "improvement_expected";
@@ -664,13 +719,16 @@ function buildHeuristicDecision(
   const longScript = wordCount > wordBudget;
   const prior = new Set(context.previousActions);
 
-  const lowCtr = (ctrScore ?? 0.4) < CTR_ACTION_THRESHOLD;
-  const lowRetention = (retentionScore ?? 0.5) < RETENTION_ACTION_THRESHOLD;
+  const lowCtr = (ctrScore ?? 0.4) <= CTR_ACTION_THRESHOLD;
+  const lowRetention = (retentionScore ?? 0.5) <= RETENTION_ACTION_THRESHOLD;
+  const predictionQuality = normalizedPredictionQuality(context);
   const bothWeak = lowCtr && lowRetention;
   const weightedPerformance = ((ctrScore ?? 0.4) + (retentionScore ?? 0.5)) / 2;
   const highCost = cost.totalUsd >= 0.12;
   const highNormalizedCost = normalizeCost(cost.totalUsd) >= 0.6;
-  const lowPerformance = weightedPerformance < 0.45;
+  const lowPerformance =
+    weightedPerformance < 0.45 ||
+    predictionQuality < PREDICTION_ACTION_THRESHOLD;
   const strongPerformance = weightedPerformance >= 0.72;
   const expensiveVoiceTier =
     (context.pipeline.voiceTier === "premium" ||
@@ -690,6 +748,13 @@ function buildHeuristicDecision(
 
     if (lowRetention && (!prior.has("MODIFY_SCRIPT") || longScript)) {
       actions.push("MODIFY_SCRIPT");
+    }
+
+    if (
+      predictionQuality < PREDICTION_ACTION_THRESHOLD &&
+      !prior.has("REGENERATE_HOOK")
+    ) {
+      actions.push("REGENERATE_HOOK");
     }
   }
 
@@ -1185,9 +1250,11 @@ function normalizeAnalysisOutput(
     context.pipeline.retentionScore ??
     normalizeScore((context.history.avgRetention ?? 50) / 100) ??
     0.5;
+  const predictionQuality = normalizedPredictionQuality(context);
   const needsIntervention =
-    ctrScore < CTR_ACTION_THRESHOLD ||
-    retentionScore < RETENTION_ACTION_THRESHOLD ||
+    ctrScore <= CTR_ACTION_THRESHOLD ||
+    retentionScore <= RETENTION_ACTION_THRESHOLD ||
+    predictionQuality < PREDICTION_ACTION_THRESHOLD ||
     context.history.nicheSaturation;
 
   const forceApprove =
@@ -1197,6 +1264,26 @@ function normalizeAnalysisOutput(
 
   if (forceApprove && !safeActions.includes("APPROVE_PIPELINE")) {
     safeActions = ["APPROVE_PIPELINE"];
+  }
+
+  if (!forceApprove && needsIntervention) {
+    const hasPerformanceAction = safeActions.some(
+      (action) =>
+        action === "REGENERATE_HOOK" ||
+        action === "MODIFY_SCRIPT" ||
+        action === "CHANGE_TOPIC",
+    );
+
+    if (!hasPerformanceAction) {
+      safeActions = dedupeActions([
+        ...buildInterventionActions(context),
+        ...safeActions.filter((action) => action !== "APPROVE_PIPELINE"),
+      ]);
+    }
+
+    if (safeActions.length === 0) {
+      safeActions = buildInterventionActions(context);
+    }
   }
 
   const confidence = Math.max(0, Math.min(1, analysis.confidence));
