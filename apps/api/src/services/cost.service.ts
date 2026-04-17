@@ -53,27 +53,44 @@ const OPENAI_TTS_VOICE_IDS = new Set([
 
 const COST_ANALYSIS_CACHE_TTL_MS = 5 * 60 * 1000;
 
+const COST_DECISIONS = [
+  "APPROVE_PIPELINE",
+  "REGENERATE_HOOK",
+  "MODIFY_SCRIPT",
+  "CHANGE_VOICE_TIER",
+  "SKIP_THUMBNAIL",
+  "CHANGE_TOPIC",
+] as const;
+
+const COST_DRIVERS = ["voice", "llm", "thumbnail", "video"] as const;
+const PERFORMANCE_DIRECTIONS = ["increase", "decrease", "neutral"] as const;
+
+export type CostDecision = (typeof COST_DECISIONS)[number];
+export type MainCostDriver = (typeof COST_DRIVERS)[number];
+export type PerformanceDirection = (typeof PERFORMANCE_DIRECTIONS)[number];
+export type VoiceTier = "economy" | "premium" | "elite" | "unknown";
+
 const CostAnalysisSchema = z.object({
-  summary: z
+  decision: z.enum(COST_DECISIONS),
+  reasoning: z
     .string()
-    .min(10)
-    .max(280)
+    .min(12)
+    .max(320)
     .describe(
-      "One concise sentence summarizing where this run spends the most.",
+      "Short explanation of why this decision improves cost-performance efficiency.",
     ),
-  dominantDriver: z
-    .enum(["voice", "thumbnail", "llm", "whisper", "mixed"])
-    .describe("Largest cost bucket for this run."),
-  optimizationActions: z
-    .array(z.string().min(10).max(220))
-    .min(2)
-    .max(4)
-    .describe("Actionable steps to reduce cost on future runs."),
-  estimatedSavingsUsd: z
-    .number()
-    .min(0)
-    .max(5)
-    .describe("Conservative total savings estimate for the actions above."),
+  cost_optimization: z.object({
+    main_cost_driver: z.enum(COST_DRIVERS),
+    suggestion: z
+      .string()
+      .min(8)
+      .max(240)
+      .describe("What to reduce or optimize for better ROI."),
+  }),
+  performance_expectation: z.object({
+    ctr: z.enum(PERFORMANCE_DIRECTIONS),
+    retention: z.enum(PERFORMANCE_DIRECTIONS),
+  }),
 });
 
 export type CostAnalysis = z.infer<typeof CostAnalysisSchema>;
@@ -82,28 +99,63 @@ const COST_ANALYSIS_PROMPT = ChatPromptTemplate.fromMessages([
   [
     "system",
     [
-      "You are a cost-optimization analyst for an automated YouTube Shorts pipeline.",
-      "Given one run's cost breakdown, propose practical ways to reduce cost while keeping quality stable.",
-      "Keep recommendations specific and implementation-friendly for engineers.",
-      "Do not repeat the same idea in different wording.",
-      "Be conservative with estimated savings.",
+      "You are an AI Cost Optimization and Decision Agent for a YouTube automation system.",
+      "Your goal is to maximize expected CTR, retention, and engagement while minimizing cost.",
+      "You must choose one concrete action decision, not just analysis.",
+      "Use pipeline outputs, cost breakdown, and historical memory to make the decision.",
+      "Prefer historically strong patterns and avoid poor ROI patterns.",
+      "When spend is high but expected performance is weak, prioritize cost-saving actions.",
+      "When performance risk is high, prioritize actions that improve hook/script/topic quality.",
+      "Return only structured JSON with the required schema.",
     ].join(" "),
   ],
   [
     "human",
     [
       "Run ID: {runId}",
-      "voiceUsd: {voiceUsd}",
-      "whisperUsd: {whisperUsd}",
-      "thumbnailUsd: {thumbnailUsd}",
-      "llmUsd: {llmUsd}",
-      "totalUsd: {totalUsd}",
-      "source: {sourceJson}",
+      "Pipeline outputs:",
+      "{pipelineJson}",
       "",
-      "Output structured JSON only.",
+      "Cost breakdown:",
+      "{costJson}",
+      "",
+      "Historical memory:",
+      "{historyJson}",
+      "",
+      "Choose exactly one decision and output structured JSON only.",
     ].join("\n"),
   ],
 ]);
+
+type HistoricalSignals = {
+  sampleSize: number;
+  avgCtr: number | null;
+  avgRetention: number | null;
+  avgPerformance: number | null;
+  strongPatternCount: number;
+  weakPatternCount: number;
+  topSuccessfulHooks: string[];
+  lowRoiHooks: string[];
+  nicheSaturation: boolean;
+};
+
+type PipelineDecisionContext = {
+  niche: string | null;
+  durationSec: number | null;
+  hookText: string | null;
+  scriptWordCount: number | null;
+  predictionScore: number | null;
+  predictedCtr: number | null;
+  predictedRetention: number | null;
+  voiceTier: VoiceTier;
+  thumbnailEnabled: boolean;
+  thumbnailQuality: string | null;
+};
+
+type CostDecisionContext = {
+  pipeline: PipelineDecisionContext;
+  history: HistoricalSignals;
+};
 
 type CostAnalysisMetrics = {
   requests: number;
@@ -129,11 +181,16 @@ const costAnalysisMetrics: CostAnalysisMetrics = {
   skippedZeroTotal: 0,
 };
 
+type CostAnalysisResult = {
+  analysis: CostAnalysis;
+  model: string;
+};
+
 const costAnalysisCache = new Map<
   string,
-  { value: CostAnalysis; expiresAt: number }
+  { value: CostAnalysisResult; expiresAt: number }
 >();
-const inFlightCostAnalysis = new Map<string, Promise<CostAnalysis | null>>();
+const inFlightCostAnalysis = new Map<string, Promise<CostAnalysisResult>>();
 
 export type CostBreakdown = {
   voiceUsd: number;
@@ -322,6 +379,375 @@ function deriveThumbnailUsdFromLog(logRow: { outputJson: unknown }): {
   };
 }
 
+const EMPTY_HISTORICAL_SIGNALS: HistoricalSignals = {
+  sampleSize: 0,
+  avgCtr: null,
+  avgRetention: null,
+  avgPerformance: null,
+  strongPatternCount: 0,
+  weakPatternCount: 0,
+  topSuccessfulHooks: [],
+  lowRoiHooks: [],
+  nicheSaturation: false,
+};
+
+function average(values: Array<number | null | undefined>): number | null {
+  const nums = values.filter(
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value),
+  );
+  if (nums.length === 0) return null;
+  const sum = nums.reduce((acc, value) => acc + value, 0);
+  return sum / nums.length;
+}
+
+function normalizeVoiceTier(value: unknown): VoiceTier {
+  if (value === "economy" || value === "premium" || value === "elite") {
+    return value;
+  }
+  return "unknown";
+}
+
+function voiceTierFromProvider(provider: string | null): VoiceTier {
+  if (provider === "elevenlabs") return "elite";
+  if (provider === "openai-tts-1-hd") return "premium";
+  if (provider === "openai-tts-1") return "economy";
+  return "unknown";
+}
+
+function compactText(text: string, maxLen = 96): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, maxLen - 3)}...`;
+}
+
+function targetWordBudget(durationSec: number | null): number {
+  if (durationSec == null || durationSec <= 0) return 170;
+  return Math.max(45, Math.round(durationSec * 2.8));
+}
+
+function pickMainCostDriver(cost: CostSnapshot): MainCostDriver {
+  const buckets: Array<[MainCostDriver, number]> = [
+    ["voice", cost.voiceUsd],
+    ["llm", cost.llmUsd],
+    ["thumbnail", cost.thumbnailUsd],
+    // We do not persist a dedicated "video" dollar amount yet. Whisper runtime
+    // is used as the nearest direct media-processing proxy.
+    ["video", cost.whisperUsd],
+  ];
+  buckets.sort((a, b) => b[1] - a[1]);
+  return buckets[0]?.[0] ?? "llm";
+}
+
+function defaultSuggestionForDriver(driver: MainCostDriver): string {
+  if (driver === "voice") {
+    return "Reserve premium or elite voice tiers for high-confidence runs only.";
+  }
+  if (driver === "thumbnail") {
+    return "Use thumbnail generation only for high-potential runs or upload candidates.";
+  }
+  if (driver === "video") {
+    return "Reduce media-processing load by keeping duration tight and scene count focused.";
+  }
+  return "Reduce regeneration loops and reuse stable prompts to cap LLM spend.";
+}
+
+function buildHeuristicDecision(
+  cost: CostSnapshot,
+  context: CostDecisionContext,
+): CostAnalysis {
+  const mainCostDriver = pickMainCostDriver(cost);
+  const predictionScore = context.pipeline.predictionScore ?? 5;
+  const predictedCtr =
+    context.pipeline.predictedCtr ?? context.history.avgCtr ?? 4;
+  const predictedRetention =
+    context.pipeline.predictedRetention ?? context.history.avgRetention ?? 50;
+  const wordCount = context.pipeline.scriptWordCount ?? 0;
+  const wordBudget = targetWordBudget(context.pipeline.durationSec);
+
+  const lowCtr = predictedCtr < 3.5 || predictionScore < 4.8;
+  const lowRetention = predictedRetention < 42;
+  const highCost = cost.totalUsd >= 0.12;
+  const expensiveVoiceTier =
+    (context.pipeline.voiceTier === "premium" ||
+      context.pipeline.voiceTier === "elite") &&
+    cost.voiceUsd >= 0.02;
+  const expensiveThumbnail =
+    context.pipeline.thumbnailEnabled && cost.thumbnailUsd >= 0.04;
+
+  if (context.history.nicheSaturation && (lowCtr || lowRetention)) {
+    return {
+      decision: "CHANGE_TOPIC",
+      reasoning:
+        "Recent runs in this niche show weak ROI and this run's expected performance is also low, so shifting to a fresher angle is the most efficient move.",
+      cost_optimization: {
+        main_cost_driver: mainCostDriver,
+        suggestion:
+          "Change to a less saturated topic before spending more on premium voice, thumbnails, or retries.",
+      },
+      performance_expectation: { ctr: "increase", retention: "increase" },
+    };
+  }
+
+  if (
+    lowCtr &&
+    (highCost ||
+      context.history.weakPatternCount > context.history.strongPatternCount)
+  ) {
+    return {
+      decision: "REGENERATE_HOOK",
+      reasoning:
+        "Expected CTR is below target while spend is non-trivial, so improving the opening hook gives the best chance to lift ROI before further costs.",
+      cost_optimization: {
+        main_cost_driver: mainCostDriver,
+        suggestion:
+          "Generate 3-5 stronger curiosity-gap hooks and keep the first 2-3 seconds specific and high-stakes.",
+      },
+      performance_expectation: { ctr: "increase", retention: "neutral" },
+    };
+  }
+
+  if (lowRetention && (wordCount > wordBudget || highCost)) {
+    return {
+      decision: "MODIFY_SCRIPT",
+      reasoning:
+        "Predicted retention is weak for the current script density, so tightening structure should improve hold rate and reduce unnecessary voice spend.",
+      cost_optimization: {
+        main_cost_driver: mainCostDriver,
+        suggestion:
+          "Shorten and simplify the script, move payoff earlier, and remove low-value filler lines.",
+      },
+      performance_expectation: { ctr: "neutral", retention: "increase" },
+    };
+  }
+
+  if (expensiveVoiceTier && predictionScore < 7.2) {
+    return {
+      decision: "CHANGE_VOICE_TIER",
+      reasoning:
+        "The selected voice tier is expensive relative to expected performance, so downgrading tier preserves budget with limited downside.",
+      cost_optimization: {
+        main_cost_driver: "voice",
+        suggestion:
+          "Downgrade to economy for this run and reserve premium or elite only for higher-confidence predictions.",
+      },
+      performance_expectation: { ctr: "neutral", retention: "neutral" },
+    };
+  }
+
+  if (expensiveThumbnail && predictionScore < 5.2) {
+    return {
+      decision: "SKIP_THUMBNAIL",
+      reasoning:
+        "Thumbnail spend is high for a low-confidence run, so skipping it improves cost efficiency without major retention impact.",
+      cost_optimization: {
+        main_cost_driver: "thumbnail",
+        suggestion:
+          "Skip thumbnail generation for this run and apply thumbnails only to strong predicted performers.",
+      },
+      performance_expectation: { ctr: "neutral", retention: "neutral" },
+    };
+  }
+
+  return {
+    decision: "APPROVE_PIPELINE",
+    reasoning:
+      "Current expected performance and spend are reasonably balanced, so the pipeline can proceed without extra regeneration cost.",
+    cost_optimization: {
+      main_cost_driver: mainCostDriver,
+      suggestion: defaultSuggestionForDriver(mainCostDriver),
+    },
+    performance_expectation: { ctr: "neutral", retention: "neutral" },
+  };
+}
+
+async function loadHistoricalSignals(
+  niche: string | null,
+): Promise<HistoricalSignals> {
+  if (!niche) {
+    return { ...EMPTY_HISTORICAL_SIGNALS };
+  }
+
+  const [topicMemoryRows, hookMemoryRows, recentRuns] = await Promise.all([
+    prisma.topicMemory.findMany({
+      where: { niche },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+      select: {
+        ctr: true,
+        avgViewPct: true,
+        performance: true,
+      },
+    }),
+    prisma.hookMemory.findMany({
+      where: { niche },
+      orderBy: { performance: "desc" },
+      take: 30,
+      select: {
+        hookText: true,
+        ctr: true,
+        avgViewPct: true,
+        performance: true,
+      },
+    }),
+    prisma.pipelineRun.findMany({
+      where: { niche },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+      select: {
+        analytics: {
+          orderBy: { snapshotAt: "desc" },
+          take: 1,
+          select: { ctr: true, avgViewPercentage: true },
+        },
+      },
+    }),
+  ]);
+
+  const latestAnalytics = recentRuns
+    .map((run) => run.analytics[0] ?? null)
+    .filter(
+      (
+        value,
+      ): value is { ctr: number | null; avgViewPercentage: number | null } =>
+        value != null,
+    );
+
+  const ctrValues: Array<number | null | undefined> = [
+    ...topicMemoryRows.map((row) => row.ctr),
+    ...hookMemoryRows.map((row) => row.ctr),
+    ...latestAnalytics.map((row) => row.ctr),
+  ];
+  const retentionValues: Array<number | null | undefined> = [
+    ...topicMemoryRows.map((row) => row.avgViewPct),
+    ...hookMemoryRows.map((row) => row.avgViewPct),
+    ...latestAnalytics.map((row) => row.avgViewPercentage),
+  ];
+  const perfValues = [
+    ...topicMemoryRows.map((row) => row.performance),
+    ...hookMemoryRows.map((row) => row.performance),
+  ];
+
+  const avgCtr = average(ctrValues);
+  const avgRetention = average(retentionValues);
+  const avgPerformance = average(perfValues);
+  const strongPatternCount = perfValues.filter((value) => value >= 0.67).length;
+  const weakPatternCount = perfValues.filter((value) => value <= 0.4).length;
+
+  const topSuccessfulHooks = Array.from(
+    new Set(
+      hookMemoryRows
+        .filter(
+          (row) =>
+            row.performance >= 0.67 ||
+            (row.ctr ?? 0) >= 4.5 ||
+            (row.avgViewPct ?? 0) >= 55,
+        )
+        .map((row) => compactText(row.hookText)),
+    ),
+  ).slice(0, 3);
+
+  const lowRoiHooks = Array.from(
+    new Set(
+      [...hookMemoryRows]
+        .sort((a, b) => a.performance - b.performance)
+        .filter(
+          (row) =>
+            row.performance <= 0.4 ||
+            ((row.ctr ?? 100) < 2.5 && (row.avgViewPct ?? 100) < 45),
+        )
+        .map((row) => compactText(row.hookText)),
+    ),
+  ).slice(0, 2);
+
+  const sampleSize =
+    topicMemoryRows.length + hookMemoryRows.length + latestAnalytics.length;
+  const nicheSaturation =
+    sampleSize >= 16 &&
+    (avgCtr ?? 100) <= 3.2 &&
+    (avgRetention ?? 100) <= 45 &&
+    weakPatternCount >= strongPatternCount + 2;
+
+  return {
+    sampleSize,
+    avgCtr: avgCtr == null ? null : round4(avgCtr),
+    avgRetention: avgRetention == null ? null : round4(avgRetention),
+    avgPerformance: avgPerformance == null ? null : round4(avgPerformance),
+    strongPatternCount,
+    weakPatternCount,
+    topSuccessfulHooks,
+    lowRoiHooks,
+    nicheSaturation,
+  };
+}
+
+async function buildDecisionContext(params: {
+  runProfile: {
+    niche: string;
+    targetDurationSec: number;
+    script: { hook: string; wordCount: number } | null;
+    prediction: {
+      score: number;
+      predictedCtr: number;
+      predictedRetention: number;
+    } | null;
+  } | null;
+  voiceLog: { inputJson: unknown } | null;
+  voiceProvider: string | null;
+  thumbnailEnabled: boolean;
+  thumbnailQuality: string | null;
+}): Promise<CostDecisionContext> {
+  const voiceInput = asRecord(params.voiceLog?.inputJson);
+  const voiceTierFromInput = normalizeVoiceTier(asString(voiceInput?.tier));
+  const voiceTier =
+    voiceTierFromInput === "unknown"
+      ? voiceTierFromProvider(params.voiceProvider)
+      : voiceTierFromInput;
+
+  const history = await loadHistoricalSignals(params.runProfile?.niche ?? null);
+
+  return {
+    pipeline: {
+      niche: params.runProfile?.niche ?? null,
+      durationSec: params.runProfile?.targetDurationSec ?? null,
+      hookText: params.runProfile?.script?.hook ?? null,
+      scriptWordCount: params.runProfile?.script?.wordCount ?? null,
+      predictionScore: params.runProfile?.prediction?.score ?? null,
+      predictedCtr: params.runProfile?.prediction?.predictedCtr ?? null,
+      predictedRetention:
+        params.runProfile?.prediction?.predictedRetention ?? null,
+      voiceTier,
+      thumbnailEnabled: params.thumbnailEnabled,
+      thumbnailQuality: params.thumbnailQuality,
+    },
+    history,
+  };
+}
+
+function contextFingerprint(context: CostDecisionContext): string {
+  return [
+    context.pipeline.niche ?? "",
+    context.pipeline.durationSec ?? "",
+    context.pipeline.hookText ?? "",
+    context.pipeline.scriptWordCount ?? "",
+    context.pipeline.predictionScore ?? "",
+    context.pipeline.predictedCtr ?? "",
+    context.pipeline.predictedRetention ?? "",
+    context.pipeline.voiceTier,
+    String(context.pipeline.thumbnailEnabled),
+    context.pipeline.thumbnailQuality ?? "",
+    context.history.sampleSize,
+    context.history.avgCtr ?? "",
+    context.history.avgRetention ?? "",
+    context.history.avgPerformance ?? "",
+    context.history.strongPatternCount,
+    context.history.weakPatternCount,
+    String(context.history.nicheSaturation),
+    context.history.topSuccessfulHooks.join("||"),
+    context.history.lowRoiHooks.join("||"),
+  ].join("|");
+}
+
 function pruneExpiredAnalysisCache(now = Date.now()): number {
   let removed = 0;
   for (const [key, value] of costAnalysisCache) {
@@ -341,7 +767,11 @@ async function runExists(runId: string): Promise<boolean> {
   return !!run;
 }
 
-function buildAnalysisCacheKey(runId: string, cost: CostSnapshot): string {
+function buildAnalysisCacheKey(
+  runId: string,
+  cost: CostSnapshot,
+  context: CostDecisionContext,
+): string {
   return [
     runId,
     cost.voiceUsd,
@@ -354,10 +784,11 @@ function buildAnalysisCacheKey(runId: string, cost: CostSnapshot): string {
     cost.source.audioDurationSec ?? "",
     cost.source.thumbnailQuality ?? "",
     String(cost.source.thumbnailEnabled),
+    contextFingerprint(context),
   ].join("|");
 }
 
-function getCachedAnalysis(key: string): CostAnalysis | null {
+function getCachedAnalysis(key: string): CostAnalysisResult | null {
   const item = costAnalysisCache.get(key);
   if (!item) return null;
   if (item.expiresAt <= Date.now()) {
@@ -370,24 +801,12 @@ function getCachedAnalysis(key: string): CostAnalysis | null {
 async function analyzeCostWithLangChain(
   runId: string,
   cost: CostSnapshot,
+  context: CostDecisionContext,
   options?: EstimateRunCostOptions,
-): Promise<CostAnalysis | null> {
+): Promise<CostAnalysisResult> {
   costAnalysisMetrics.requests += 1;
 
-  if (!env.ENABLE_LANGCHAIN_COST_ANALYSIS) {
-    costAnalysisMetrics.skippedDisabled += 1;
-    return null;
-  }
-  if (!env.OPENAI_API_KEY) {
-    costAnalysisMetrics.skippedMissingApiKey += 1;
-    return null;
-  }
-  if (cost.totalUsd <= 0) {
-    costAnalysisMetrics.skippedZeroTotal += 1;
-    return null;
-  }
-
-  const cacheKey = buildAnalysisCacheKey(runId, cost);
+  const cacheKey = buildAnalysisCacheKey(runId, cost, context);
   pruneExpiredAnalysisCache();
 
   if (!options?.forceReanalyze) {
@@ -405,43 +824,82 @@ async function analyzeCostWithLangChain(
     return inFlight;
   }
 
-  const task = (async (): Promise<CostAnalysis | null> => {
+  const task = (async (): Promise<CostAnalysisResult> => {
     try {
-      const model = new ChatOpenAI({
-        apiKey: env.OPENAI_API_KEY,
-        model: env.OPENAI_MODEL_COST_ANALYSIS,
-        temperature: 0.2,
-        maxRetries: 1,
-        timeout: 15_000,
+      const heuristic = (): CostAnalysisResult => ({
+        analysis: buildHeuristicDecision(cost, context),
+        model: "heuristic",
       });
 
-      const chain = COST_ANALYSIS_PROMPT.pipe(
-        model.withStructuredOutput(CostAnalysisSchema),
-      );
+      let result: CostAnalysisResult;
+      if (!env.ENABLE_LANGCHAIN_COST_ANALYSIS) {
+        costAnalysisMetrics.skippedDisabled += 1;
+        result = heuristic();
+      } else if (!env.OPENAI_API_KEY) {
+        costAnalysisMetrics.skippedMissingApiKey += 1;
+        result = heuristic();
+      } else if (cost.totalUsd <= 0) {
+        costAnalysisMetrics.skippedZeroTotal += 1;
+        result = heuristic();
+      } else {
+        const model = new ChatOpenAI({
+          apiKey: env.OPENAI_API_KEY,
+          model: env.OPENAI_MODEL_COST_ANALYSIS,
+          temperature: 0.15,
+          maxRetries: 1,
+          timeout: 15_000,
+        });
 
-      const analysis = await chain.invoke({
-        runId,
-        voiceUsd: cost.voiceUsd.toFixed(4),
-        whisperUsd: cost.whisperUsd.toFixed(4),
-        thumbnailUsd: cost.thumbnailUsd.toFixed(4),
-        llmUsd: cost.llmUsd.toFixed(4),
-        totalUsd: cost.totalUsd.toFixed(4),
-        sourceJson: JSON.stringify(cost.source),
-      });
+        const chain = COST_ANALYSIS_PROMPT.pipe(
+          model.withStructuredOutput(CostAnalysisSchema),
+        );
+
+        const analysis = await chain.invoke({
+          runId,
+          pipelineJson: JSON.stringify(context.pipeline),
+          costJson: JSON.stringify({
+            llmCostUsd: round4(cost.llmUsd),
+            voiceCostUsd: round4(cost.voiceUsd),
+            videoCostUsd: round4(cost.whisperUsd),
+            thumbnailCostUsd: round4(cost.thumbnailUsd),
+            totalCostUsd: round4(cost.totalUsd),
+            source: cost.source,
+          }),
+          historyJson: JSON.stringify(context.history),
+        });
+
+        result = {
+          analysis,
+          model: env.OPENAI_MODEL_COST_ANALYSIS,
+        };
+        costAnalysisCache.set(cacheKey, {
+          value: result,
+          expiresAt: Date.now() + COST_ANALYSIS_CACHE_TTL_MS,
+        });
+        costAnalysisMetrics.generated += 1;
+        return result;
+      }
 
       costAnalysisCache.set(cacheKey, {
-        value: analysis,
+        value: result,
         expiresAt: Date.now() + COST_ANALYSIS_CACHE_TTL_MS,
       });
-      costAnalysisMetrics.generated += 1;
-      return analysis;
+      return result;
     } catch (err) {
       costAnalysisMetrics.failed += 1;
+      const fallback: CostAnalysisResult = {
+        analysis: buildHeuristicDecision(cost, context),
+        model: "heuristic",
+      };
       log.warn(
         { err, runId },
-        "langchain cost analysis failed; returning raw breakdown",
+        "langchain cost analysis failed; using heuristic decision",
       );
-      return null;
+      costAnalysisCache.set(cacheKey, {
+        value: fallback,
+        expiresAt: Date.now() + COST_ANALYSIS_CACHE_TTL_MS,
+      });
+      return fallback;
     } finally {
       inFlightCostAnalysis.delete(cacheKey);
     }
@@ -459,7 +917,7 @@ export async function estimateRunCost(
   runId: string,
   options?: EstimateRunCostOptions,
 ): Promise<CostBreakdown> {
-  const [voice, thumbnailLog, voiceLog] = await Promise.all([
+  const [voice, thumbnailLog, voiceLog, runProfile] = await Promise.all([
     prisma.voiceAsset.findUnique({ where: { runId } }),
     prisma.agentLog.findFirst({
       where: { runId, agent: "thumbnail", status: "SUCCESS" },
@@ -468,6 +926,26 @@ export async function estimateRunCost(
     prisma.agentLog.findFirst({
       where: { runId, agent: "voice", status: "SUCCESS" },
       orderBy: { createdAt: "desc" },
+    }),
+    prisma.pipelineRun.findUnique({
+      where: { id: runId },
+      select: {
+        niche: true,
+        targetDurationSec: true,
+        script: {
+          select: {
+            hook: true,
+            wordCount: true,
+          },
+        },
+        prediction: {
+          select: {
+            score: true,
+            predictedCtr: true,
+            predictedRetention: true,
+          },
+        },
+      },
     }),
   ]);
 
@@ -535,12 +1013,25 @@ export async function estimateRunCost(
     },
   };
 
-  const analysis = await analyzeCostWithLangChain(runId, base, options);
+  const context = await buildDecisionContext({
+    runProfile,
+    voiceLog: voiceLog ? { inputJson: voiceLog.inputJson } : null,
+    voiceProvider,
+    thumbnailEnabled,
+    thumbnailQuality,
+  });
+
+  const analysisResult = await analyzeCostWithLangChain(
+    runId,
+    base,
+    context,
+    options,
+  );
 
   return {
     ...base,
-    analysis,
-    analysisModel: analysis ? env.OPENAI_MODEL_COST_ANALYSIS : null,
+    analysis: analysisResult.analysis,
+    analysisModel: analysisResult.model,
   };
 }
 

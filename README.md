@@ -19,7 +19,7 @@ Highlights:
 - Real-time run updates via SSE
 - YouTube OAuth, upload, and analytics sync
 - Topic and hook memory retrieval/admission with embeddings
-- Cost breakdown + LangChain optimization analysis (API + frontend)
+- Cost breakdown + AI decision agent with actionable optimization outcomes
 
 ## Architecture
 
@@ -149,30 +149,60 @@ Behavior:
 
 ## Cost Analysis
 
-The system exposes two layers of cost intelligence:
+The system exposes two layers of cost intelligence for each run:
 
 1. Deterministic cost breakdown
    - Voice
    - Whisper
    - Thumbnail
    - Flat LLM estimate
-2. Optional LangChain analysis
-   - Summary
-   - Dominant cost driver
-   - Optimization actions
-   - Estimated savings
+2. Decision analysis (LangChain + heuristic fallback)
+   - Chooses one concrete action decision
+   - Explains cost-performance reasoning
+   - Reports primary cost driver + optimization suggestion
+   - States expected CTR and retention direction
 
-LangChain analysis is controlled by env flags and degrades gracefully to raw numeric breakdown when disabled or unavailable.
+The decision agent evaluates pipeline outputs, run-level costs, and historical memory/ROI signals. If LangChain is disabled or unavailable, the API returns a deterministic heuristic decision with the same response schema.
+
+Possible decisions:
+
+- `APPROVE_PIPELINE`
+- `REGENERATE_HOOK`
+- `MODIFY_SCRIPT`
+- `CHANGE_VOICE_TIER`
+- `SKIP_THUMBNAIL`
+- `CHANGE_TOPIC`
+
+Example `cost.analysis` response shape:
+
+```json
+{
+  "decision": "REGENERATE_HOOK",
+  "reasoning": "Expected CTR is low for current spend, so improving the opening hook has the highest ROI.",
+  "cost_optimization": {
+    "main_cost_driver": "voice",
+    "suggestion": "Reserve premium voice tiers for high-confidence runs."
+  },
+  "performance_expectation": {
+    "ctr": "increase",
+    "retention": "neutral"
+  }
+}
+```
 
 ### Cost in Frontend
 
 Run detail page includes a dedicated Cost Analysis card with:
 
 - Bucket visualization (voice/whisper/thumbnail/llm)
-- AI optimization advice
+- Decision badge (action to take now)
+- Reasoning summary
+- Main cost driver + optimization suggestion
+- CTR/retention expectation chips
 - Cost timeline events
 - Cache health metrics
 - Manual refresh button (`refreshAnalysis=true`)
+- Analysis model indicator (`OPENAI_MODEL_COST_ANALYSIS` or `heuristic` fallback)
 
 ## API Endpoints
 
@@ -199,20 +229,25 @@ Run detail page includes a dedicated Cost Analysis card with:
 
 ### Analytics
 
-| Method | Path                           | Purpose                                |
-| ------ | ------------------------------ | -------------------------------------- | --- | ---- | ---------------------- |
-| `GET`  | `/pipeline/:id/analytics`      | Per-run analytics + feedback           |
-| `POST` | `/pipeline/:id/analytics/sync` | Queue enrichment for run               |
-| `POST` | `/analytics/sync`              | Queue enrichment for all uploaded runs |
-| `GET`  | `/analytics/channel?days=7     | 28                                     | 90  | 365` | Channel dashboard data |
+| Method | Path                                     | Purpose                                |
+| ------ | ---------------------------------------- | -------------------------------------- |
+| `GET`  | `/pipeline/:id/analytics`                | Per-run analytics + feedback           |
+| `POST` | `/pipeline/:id/analytics/sync`           | Queue enrichment for run               |
+| `POST` | `/analytics/sync`                        | Queue enrichment for all uploaded runs |
+| `GET`  | `/analytics/channel?days=7\|28\|90\|365` | Channel dashboard data                 |
 
 ### Cost
 
-| Method | Path                    | Purpose                                           |
-| ------ | ----------------------- | ------------------------------------------------- |
-| `GET`  | `/cost/run/:id`         | Current run cost + optional LangChain analysis    |
-| `GET`  | `/cost/run/:id/history` | Cost timeline events (`limit`, `refreshAnalysis`) |
-| `GET`  | `/cost/cache/stats`     | In-memory cost analysis cache stats               |
+| Method | Path                    | Purpose                                                             |
+| ------ | ----------------------- | ------------------------------------------------------------------- |
+| `GET`  | `/cost/run/:id`         | Current run cost + decision analysis output                         |
+| `GET`  | `/cost/run/:id/history` | Cost timeline events + latest decision (`limit`, `refreshAnalysis`) |
+| `GET`  | `/cost/cache/stats`     | In-memory cost analysis cache stats                                 |
+
+Cost query options:
+
+- `refreshAnalysis=true`: bypass cache and regenerate decision analysis for this request.
+- `limit=<1..200>` on `/cost/run/:id/history`: bound timeline event count.
 
 ### YouTube Auth
 

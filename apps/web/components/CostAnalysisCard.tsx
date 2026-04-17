@@ -12,7 +12,28 @@ function pct(value: number, total: number) {
   return `${((value / total) * 100).toFixed(1)}%`;
 }
 
-function driverLabel(driver: CostAnalysis["dominantDriver"]) {
+function decisionLabel(decision: CostAnalysis["decision"]) {
+  switch (decision) {
+    case "APPROVE_PIPELINE":
+      return "Approve pipeline";
+    case "REGENERATE_HOOK":
+      return "Regenerate hook";
+    case "MODIFY_SCRIPT":
+      return "Modify script";
+    case "CHANGE_VOICE_TIER":
+      return "Change voice tier";
+    case "SKIP_THUMBNAIL":
+      return "Skip thumbnail";
+    case "CHANGE_TOPIC":
+      return "Change topic";
+    default:
+      return decision;
+  }
+}
+
+function driverLabel(
+  driver: CostAnalysis["cost_optimization"]["main_cost_driver"],
+) {
   switch (driver) {
     case "voice":
       return "Voice";
@@ -20,11 +41,21 @@ function driverLabel(driver: CostAnalysis["dominantDriver"]) {
       return "Thumbnail";
     case "llm":
       return "LLM";
-    case "whisper":
-      return "Whisper";
+    case "video":
+      return "Video";
     default:
-      return "Mixed";
+      return driver;
   }
+}
+
+function directionTone(value: CostAnalysis["performance_expectation"]["ctr"]) {
+  if (value === "increase") return "text-emerald-200 bg-emerald-500/20";
+  if (value === "decrease") return "text-red-200 bg-red-500/20";
+  return "text-slate-200 bg-slate-500/20";
+}
+
+function directionLabel(value: CostAnalysis["performance_expectation"]["ctr"]) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function CostBucket({
@@ -173,20 +204,51 @@ export function CostAnalysisCard({
 
       {analysis ? (
         <div className="rounded border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
-          <div className="text-sm text-cyan-100">{analysis.summary}</div>
-          <div className="text-xs text-cyan-200/90">
-            dominant driver: {driverLabel(analysis.dominantDriver)} · potential
-            savings {usd(analysis.estimatedSavingsUsd)}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-cyan-200/90">
+              Decision
+            </span>
+            <span className="text-xs rounded bg-cyan-400/20 text-cyan-100 px-2 py-1 border border-cyan-300/30">
+              {decisionLabel(analysis.decision)}
+            </span>
           </div>
-          <ul className="text-sm list-disc pl-5 space-y-1 text-white/90">
-            {analysis.optimizationActions.map((action, idx) => (
-              <li key={`${idx}-${action.slice(0, 24)}`}>{action}</li>
-            ))}
-          </ul>
+          <div className="text-sm text-cyan-100">{analysis.reasoning}</div>
+          <div className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-2 space-y-1">
+            <div className="text-[11px] uppercase tracking-wider text-cyan-200/90">
+              Cost optimization
+            </div>
+            <div className="text-xs text-cyan-100/90">
+              main cost driver:{" "}
+              {driverLabel(analysis.cost_optimization.main_cost_driver)}
+            </div>
+            <div className="text-sm text-white/90">
+              {analysis.cost_optimization.suggestion}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-cyan-200/90">
+              Performance expectation
+            </span>
+            <span
+              className={`text-xs px-2 py-1 rounded border border-white/10 ${directionTone(
+                analysis.performance_expectation.ctr,
+              )}`}
+            >
+              CTR {directionLabel(analysis.performance_expectation.ctr)}
+            </span>
+            <span
+              className={`text-xs px-2 py-1 rounded border border-white/10 ${directionTone(
+                analysis.performance_expectation.retention,
+              )}`}
+            >
+              Retention{" "}
+              {directionLabel(analysis.performance_expectation.retention)}
+            </span>
+          </div>
         </div>
       ) : (
         <div className="rounded border border-white/10 bg-white/[0.03] p-3 text-sm text-white/70">
-          AI optimization suggestions are unavailable for this run right now.
+          Decision analysis is unavailable for this run right now.
         </div>
       )}
 

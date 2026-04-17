@@ -234,10 +234,22 @@ export type PipelineRun = {
 };
 
 export type CostAnalysis = {
-  summary: string;
-  dominantDriver: "voice" | "thumbnail" | "llm" | "whisper" | "mixed";
-  optimizationActions: string[];
-  estimatedSavingsUsd: number;
+  decision:
+    | "APPROVE_PIPELINE"
+    | "REGENERATE_HOOK"
+    | "MODIFY_SCRIPT"
+    | "CHANGE_VOICE_TIER"
+    | "SKIP_THUMBNAIL"
+    | "CHANGE_TOPIC";
+  reasoning: string;
+  cost_optimization: {
+    main_cost_driver: "voice" | "llm" | "thumbnail" | "video";
+    suggestion: string;
+  };
+  performance_expectation: {
+    ctr: "increase" | "decrease" | "neutral";
+    retention: "increase" | "decrease" | "neutral";
+  };
 };
 
 export type RunCost = {
