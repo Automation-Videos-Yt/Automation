@@ -1,28 +1,26 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { scoped } from "../lib/logger";
 import {
-  getRunCost,
   type CostAction,
   type CostAnalysis,
   type CostBreakdown,
 } from "./cost.service";
 import {
   PipelineServiceError,
-  requeuePipelineRunFromStage,
   type RunControlOverrides,
   type StageResetPoint,
-  type VoiceTierOverride,
 } from "./pipeline.service";
+import {
+  getCostAgentRunCost,
+  requeueCostAgentRun,
+} from "../repositories/cost-agent.repository";
+import {
+  buildControlOverrides,
+  isActionable,
+  stageForAction,
+} from "../utils/cost-agent.utils";
 
 const log = scoped("cost-agent");
-
-const ACTIONABLE_ACTIONS = new Set<CostAction>([
-  "REGENERATE_HOOK",
-  "MODIFY_SCRIPT",
-  "CHANGE_VOICE_TIER",
-  "SKIP_THUMBNAIL",
-  "CHANGE_TOPIC",
-]);
 
 export type ExecuteCostAgentActionOptions = {
   requestedAction?: CostAction;
@@ -42,7 +40,10 @@ export type ExecuteCostAgentActionResult = {
   analysisModel: string | null;
 };
 
-type RunCostPayload = Exclude<Awaited<ReturnType<typeof getRunCost>>, null>;
+type RunCostPayload = Exclude<
+  Awaited<ReturnType<typeof getCostAgentRunCost>>,
+  null
+>;
 
 type CostAgentGraphData = {
   runId: string;
@@ -66,84 +67,6 @@ const CostAgentGraphAnnotation = Annotation.Root({
 });
 
 type CostAgentGraphState = typeof CostAgentGraphAnnotation.State;
-
-function stageForAction(action: CostAction): StageResetPoint | null {
-  switch (action) {
-    case "CHANGE_TOPIC":
-      return "TOPIC";
-    case "MODIFY_SCRIPT":
-      return "SCRIPT";
-    case "REGENERATE_HOOK":
-      return "HOOK";
-    case "CHANGE_VOICE_TIER":
-      return "VOICE";
-    case "SKIP_THUMBNAIL":
-      return "THUMBNAIL";
-    default:
-      return null;
-  }
-}
-
-function isActionable(action: CostAction): boolean {
-  return ACTIONABLE_ACTIONS.has(action);
-}
-
-function currentVoiceTier(provider: string | null): VoiceTierOverride {
-  if (provider === "elevenlabs") return "elite";
-  if (provider === "openai-tts-1-hd") return "premium";
-  return "economy";
-}
-
-function nextUpgradeTier(current: VoiceTierOverride): VoiceTierOverride {
-  if (current === "economy") return "premium";
-  if (current === "premium") return "elite";
-  return "elite";
-}
-
-function resolveVoiceTierOverride(
-  analysis: CostAnalysis,
-  cost: CostBreakdown,
-): VoiceTierOverride | null {
-  const current = currentVoiceTier(cost.source.voiceProvider);
-  const downgrade =
-    analysis.cost_optimization.main_cost_driver === "voice" ||
-    cost.totalUsd >= 0.12 ||
-    (analysis.expected_impact.ctr !== "increase" &&
-      analysis.expected_impact.retention !== "increase");
-
-  if (downgrade) {
-    return current === "economy" ? null : "economy";
-  }
-
-  const upgraded = nextUpgradeTier(current);
-  return upgraded === current ? null : upgraded;
-}
-
-function buildControlOverrides(
-  action: CostAction,
-  analysis: CostAnalysis,
-  cost: CostBreakdown,
-): RunControlOverrides | null {
-  if (action === "CHANGE_VOICE_TIER") {
-    const forceVoiceTier = resolveVoiceTierOverride(analysis, cost);
-    if (!forceVoiceTier) return null;
-    return {
-      forceVoiceTier,
-      sourceAction: action,
-    };
-  }
-
-  if (action === "SKIP_THUMBNAIL") {
-    return {
-      forceSkipThumbnail: true,
-      sourceAction: action,
-    };
-  }
-
-  return {
-    sourceAction: action,
-  };
-}
 
 function seedGraphState(
   runId: string,
@@ -176,9 +99,10 @@ function withState(
 
 async function loadContextNode(graphState: CostAgentGraphState) {
   const current = graphState.state;
-  const payload = await getRunCost(current.runId, {
-    forceReanalyze: current.forceReanalyze,
-  });
+  const payload = await getCostAgentRunCost(
+    current.runId,
+    current.forceReanalyze,
+  );
 
   if (!payload) {
     return {
@@ -325,7 +249,7 @@ async function executeActionNode(graphState: CostAgentGraphState) {
     };
   }
 
-  await requeuePipelineRunFromStage(
+  await requeueCostAgentRun(
     current.runId,
     current.fromStage,
     current.control ?? undefined,
