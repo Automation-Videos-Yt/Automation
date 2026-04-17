@@ -2,7 +2,10 @@ import type { PipelineRun, PrismaClient } from "@prisma/client";
 import type { Logger } from "pino";
 import type { WorkerConfig } from "../config/env";
 import type { PastHook, PastTopic } from "../memory/vectorStore";
-import type { RunFeatures as QueueRunFeatures } from "../queues/videoQueue";
+import type {
+  RunControlOverrides as QueueRunControlOverrides,
+  RunFeatures as QueueRunFeatures,
+} from "../queues/videoQueue";
 
 export type TopicOutput = {
   title: string;
@@ -117,6 +120,8 @@ export interface StageCache {
   run?: PipelineRun;
   experimentId?: string;
   features: QueueRunFeatures;
+  control?: QueueRunControlOverrides;
+  stageRetryCounts?: Partial<Record<StageName, number>>;
   pastTopics?: PastTopic[];
   pastHooks?: PastHook[];
   topic?: TopicOutput;
@@ -149,10 +154,11 @@ export interface StageResult {
 }
 
 export interface PipelineStage {
-  name: string;
+  name: StageName;
   execute(input: StageContext): Promise<StageResult>;
   shouldSkip?(context: StageContext): Promise<boolean>;
   onError?(error: unknown, context: StageContext): Promise<void>;
 }
 
 export type RunFeatures = QueueRunFeatures;
+export type RunControlOverrides = QueueRunControlOverrides;

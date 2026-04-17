@@ -45,9 +45,16 @@ export function startEventBus() {
 
 export function subscribeRun(
   runId: string,
-  handler: (evt: PipelineEvent) => void
+  handler: (evt: PipelineEvent) => void,
 ): () => void {
   const key = `run:${runId}`;
   bus.on(key, handler);
   return () => bus.off(key, handler);
+}
+
+export function subscribeAll(
+  handler: (evt: PipelineEvent) => void,
+): () => void {
+  bus.on("event", handler);
+  return () => bus.off("event", handler);
 }

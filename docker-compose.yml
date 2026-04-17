@@ -45,8 +45,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # MVP uses `db push` (schema sync) — swap to `migrate deploy` once migrations are tracked.
-    command: sh -c "npx prisma db push --accept-data-loss --skip-generate && npx tsx src/index.ts"
+    # Local/dev startup: sync schema against existing DBs without migration-history enforcement.
+    command: sh -c "npx prisma db push && npx tsx src/index.ts"
 
   worker:
     build:

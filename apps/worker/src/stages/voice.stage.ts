@@ -10,13 +10,16 @@ import {
   getPrediction,
   getRun,
   startStage,
-  voiceTierFromScore,
   withAgentLog,
 } from "./helpers";
 import type { PipelineStage, VoiceOutput } from "./types";
 
 const STAGE = "VOICE" as const;
 const AGENT = "voice";
+
+function voiceTierFromScore(score: number): "elite" | "premium" | "economy" {
+  return score >= 7.5 ? "premium" : "economy";
+}
 
 export const voiceStage: PipelineStage = {
   name: STAGE,
@@ -37,7 +40,8 @@ export const voiceStage: PipelineStage = {
     const audioDir = path.join(env.STORAGE_PATH, "audio");
     await mkdir(audioDir, { recursive: true });
     const audioPath = path.join(audioDir, `${context.runId}.mp3`);
-    const tier = voiceTierFromScore(prediction.score);
+    const forcedTier = context.cache.control?.forceVoiceTier;
+    const tier = forcedTier ?? voiceTierFromScore(prediction.score);
     const voiceInput = {
       text: narration,
       output_path: audioPath,
@@ -45,10 +49,15 @@ export const voiceStage: PipelineStage = {
       language_code: run.languageCode,
     };
 
-    const voice = await withAgentLog(context.prisma, context.runId, AGENT, voiceInput, () =>
-      runAgent<typeof voiceInput, VoiceOutput>(AGENT, voiceInput, {
-        runId: context.runId,
-      }),
+    const voice = await withAgentLog(
+      context.prisma,
+      context.runId,
+      AGENT,
+      voiceInput,
+      () =>
+        runAgent<typeof voiceInput, VoiceOutput>(AGENT, voiceInput, {
+          runId: context.runId,
+        }),
     );
 
     await context.prisma.voiceAsset.create({
@@ -65,6 +74,7 @@ export const voiceStage: PipelineStage = {
     await completeStage(context, STAGE, AGENT, {
       durationSec: voice.duration_sec,
       tier,
+      forced: Boolean(forcedTier),
     });
     return { success: true, data: voice };
   },

@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db/prisma";
 import { videoQueue } from "../queues/videoQueue";
 import { uploadQueue } from "../queues/uploadQueue";
@@ -42,6 +43,111 @@ export type RunFeatures = {
   enableHookVariants: boolean;
 };
 
+export type VoiceTierOverride = "economy" | "premium" | "elite";
+
+export type RunControlOverrides = {
+  forceVoiceTier?: VoiceTierOverride;
+  forceSkipThumbnail?: boolean;
+  sourceAction?: string;
+  iteration?: number;
+};
+
+export type StageResetPoint =
+  | "TOPIC"
+  | "SCRIPT"
+  | "HOOK"
+  | "PREDICTION"
+  | "VOICE"
+  | "TIMESTAMP"
+  | "VIDEO_SELECTION"
+  | "VIDEO"
+  | "THUMBNAIL";
+
+const STAGE_ORDER: StageResetPoint[] = [
+  "TOPIC",
+  "SCRIPT",
+  "HOOK",
+  "PREDICTION",
+  "VOICE",
+  "TIMESTAMP",
+  "VIDEO_SELECTION",
+  "VIDEO",
+  "THUMBNAIL",
+];
+
+const STAGE_AGENT_FILTERS: Record<
+  StageResetPoint,
+  Prisma.AgentLogWhereInput[]
+> = {
+  TOPIC: [{ agent: { startsWith: "topic" } }],
+  SCRIPT: [{ agent: "script" }],
+  HOOK: [{ agent: "hook" }, { agent: "hook_ab_seed" }],
+  PREDICTION: [{ agent: "prediction" }],
+  VOICE: [{ agent: "voice" }],
+  TIMESTAMP: [{ agent: "timestamp" }],
+  VIDEO_SELECTION: [{ agent: "video_selection" }],
+  VIDEO: [{ agent: "video_meta" }],
+  THUMBNAIL: [{ agent: "thumbnail" }],
+};
+
+function downstreamStagesFrom(stage: StageResetPoint): StageResetPoint[] {
+  const idx = STAGE_ORDER.indexOf(stage);
+  if (idx < 0) return [stage];
+  return STAGE_ORDER.slice(idx);
+}
+
+function agentFiltersForStages(
+  stages: StageResetPoint[],
+): Prisma.AgentLogWhereInput[] {
+  return stages.flatMap((stage) => STAGE_AGENT_FILTERS[stage] ?? []);
+}
+
+async function resetRunArtifactsFromStage(
+  tx: Prisma.TransactionClient,
+  runId: string,
+  stage: StageResetPoint,
+): Promise<void> {
+  const affected = downstreamStagesFrom(stage);
+
+  if (affected.includes("TOPIC")) {
+    await tx.topic.deleteMany({ where: { runId } });
+  }
+  if (affected.includes("SCRIPT")) {
+    await tx.script.deleteMany({ where: { runId } });
+  }
+  if (affected.includes("HOOK")) {
+    await tx.hookVariant.deleteMany({ where: { runId } });
+  }
+  if (affected.includes("PREDICTION")) {
+    await tx.performancePrediction.deleteMany({ where: { runId } });
+  }
+  if (affected.includes("VOICE")) {
+    await tx.voiceAsset.deleteMany({ where: { runId } });
+  }
+  if (affected.includes("VIDEO_SELECTION")) {
+    await tx.scene.deleteMany({ where: { runId } });
+  }
+
+  if (affected.includes("VIDEO")) {
+    await tx.video.deleteMany({ where: { runId } });
+  } else if (affected.includes("THUMBNAIL")) {
+    await tx.video.updateMany({
+      where: { runId },
+      data: { thumbnailPath: null },
+    });
+  }
+
+  const agentFilters = agentFiltersForStages(affected);
+  if (agentFilters.length > 0) {
+    await tx.agentLog.deleteMany({
+      where: {
+        runId,
+        OR: agentFilters,
+      },
+    });
+  }
+}
+
 const DEFAULT_RUN_FEATURES: RunFeatures = {
   enableTimestamp: true,
   enableSubtitles: true,
@@ -58,6 +164,15 @@ function normalizeRunFeatures(features?: Partial<RunFeatures>): RunFeatures {
     next.enableSubtitles = false;
   }
   return next;
+}
+
+function validateRunFeatures(features: RunFeatures): void {
+  if (features.enableSubtitles && !features.enableTimestamp) {
+    throw new PipelineServiceError(
+      "INVALID_FEATURES",
+      "enableSubtitles=true requires enableTimestamp=true",
+    );
+  }
 }
 
 export type HookExperimentRun = {
@@ -139,6 +254,7 @@ export async function createPipelineBatch(
 ) {
   const normalizedLanguageCodes = normalizeLanguageCodes(languageCodes);
   const normalizedFeatures = normalizeRunFeatures(features);
+  validateRunFeatures(normalizedFeatures);
   const runs = [];
   for (let i = 0; i < count; i++) {
     for (const languageCode of normalizedLanguageCodes) {
@@ -175,6 +291,7 @@ export async function createPipelineRun(
   const normalizedLanguageCode =
     normalizeLanguageCodes([languageCode])[0] ?? "en";
   const normalizedFeatures = normalizeRunFeatures(features);
+  validateRunFeatures(normalizedFeatures);
   const run = await prisma.$transaction(async (tx) => {
     const created = await tx.pipelineRun.create({
       data: {
@@ -369,7 +486,15 @@ export async function retryPipelineRun(id: string) {
 
   const updated = await prisma.pipelineRun.update({
     where: { id },
-    data: { status: "QUEUED", errorMessage: null, currentAgent: null },
+    data: {
+      status: "QUEUED",
+      errorMessage: null,
+      currentAgent: null,
+      completedAt: null,
+      failedStage: null,
+      stageFailureReason: null,
+      stageFailureMeta: Prisma.JsonNull,
+    },
   });
 
   await videoQueue.add(
@@ -384,6 +509,74 @@ export async function retryPipelineRun(id: string) {
     },
   );
   log.info({ runId: id, stage: run.stage }, "retry enqueued");
+  return updated;
+}
+
+export async function requeuePipelineRunFromStage(
+  id: string,
+  fromStage: StageResetPoint,
+  control?: RunControlOverrides,
+) {
+  const run = await prisma.pipelineRun.findUnique({
+    where: { id },
+    include: { upload: true },
+  });
+  if (!run) throw new PipelineServiceError("NOT_FOUND", "run not found");
+
+  if (run.status === "RUNNING" || run.status === "QUEUED") {
+    throw new PipelineServiceError(
+      "ALREADY_RUNNING",
+      `run is ${run.status} — cannot optimize right now`,
+    );
+  }
+
+  if (run.upload?.status === "RUNNING" || run.upload?.status === "PENDING") {
+    throw new PipelineServiceError(
+      "UPLOAD_IN_PROGRESS",
+      "run upload is in progress — wait before applying optimization actions",
+    );
+  }
+
+  if (run.upload?.status === "COMPLETED") {
+    throw new PipelineServiceError(
+      "UPLOADED_LOCKED",
+      "run already uploaded — create a new run to apply optimization actions",
+    );
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await resetRunArtifactsFromStage(tx, id, fromStage);
+
+    return tx.pipelineRun.update({
+      where: { id },
+      data: {
+        stage: "QUEUED",
+        status: "QUEUED",
+        currentAgent: null,
+        errorMessage: null,
+        startedAt: null,
+        completedAt: null,
+        failedStage: null,
+        stageFailureReason: null,
+        stageFailureMeta: Prisma.JsonNull,
+        stageRetryCounts: Prisma.JsonNull,
+      },
+    });
+  });
+
+  await videoQueue.add(
+    "run-pipeline",
+    { runId: id, control },
+    {
+      jobId: `${id}-agentic-${Date.now()}`,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 5_000 },
+      removeOnComplete: { count: 200 },
+      removeOnFail: { count: 200 },
+    },
+  );
+
+  log.info({ runId: id, fromStage, control }, "agentic optimization requeued");
   return updated;
 }
 
@@ -437,6 +630,14 @@ export async function cancelPipelineRun(id: string) {
       status: "FAILED",
       currentAgent: null,
       errorMessage: USER_CANCELLED_MESSAGE,
+      completedAt: null,
+      failedStage: run.stage === "FAILED" ? null : run.stage,
+      stageFailureReason: USER_CANCELLED_MESSAGE,
+      stageFailureMeta: {
+        cancelled: true,
+        videoJobsRemoved,
+        uploadJobsRemoved,
+      } as Prisma.InputJsonValue,
     },
   });
 

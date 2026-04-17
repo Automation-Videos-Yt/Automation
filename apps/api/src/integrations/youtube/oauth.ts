@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import { env } from "../../config/env";
 import { prisma } from "../../db/prisma";
 import { scoped } from "../../lib/logger";
+import { decryptSecret, encryptSecret } from "../../lib/secret-crypto";
 
 const log = scoped("yt-oauth-lib");
 
@@ -61,8 +62,8 @@ export async function authedClient() {
 
   const client = oauthClient();
   client.setCredentials({
-    access_token: acct.accessToken,
-    refresh_token: acct.refreshToken,
+    access_token: decryptSecret(acct.accessToken),
+    refresh_token: decryptSecret(acct.refreshToken),
     expiry_date: acct.tokenExpiresAt.getTime(),
     scope: acct.scope,
   });
@@ -72,9 +73,11 @@ export async function authedClient() {
       await prisma.youTubeAccount.update({
         where: { id: "default" },
         data: {
-          accessToken: tokens.access_token ?? acct.accessToken,
+          accessToken: tokens.access_token
+            ? encryptSecret(tokens.access_token)
+            : acct.accessToken,
           ...(tokens.refresh_token
-            ? { refreshToken: tokens.refresh_token }
+            ? { refreshToken: encryptSecret(tokens.refresh_token) }
             : {}),
           tokenExpiresAt: tokens.expiry_date
             ? new Date(tokens.expiry_date)

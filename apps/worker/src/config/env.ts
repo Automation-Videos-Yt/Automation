@@ -1,71 +1,104 @@
 import { z } from "zod";
 import "dotenv/config";
 
-const schema = z.object({
-  NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
-  DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url(),
-  AI_SERVICE_URL: z.string().url(),
-  STORAGE_PATH: z.string().default("/storage"),
-  // all: start all queue consumers in one process (legacy/default)
-  // video/upload/enrichment: dedicated role-specific process.
-  WORKER_ROLE: z.enum(["all", "video", "upload", "enrichment"]).default("all"),
-  WORKER_CONCURRENCY: z.coerce.number().default(1),
-  UPLOAD_WORKER_CONCURRENCY: z.coerce.number().default(1),
-  ENRICHMENT_WORKER_CONCURRENCY: z.coerce.number().default(2),
-  YOUTUBE_CLIENT_ID: z.string().optional(),
-  YOUTUBE_CLIENT_SECRET: z.string().optional(),
-  YOUTUBE_REDIRECT_URI: z
-    .string()
-    .url()
-    .default("http://localhost:4000/auth/youtube/callback"),
-  // Toggle the THUMBNAIL stage. Set to "true" to re-enable gpt-image-1 generation.
-  // Off by default: YouTube rejects custom thumbnails from unverified channels anyway.
-  ENABLE_THUMBNAIL_AGENT: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((v) => v === "true"),
-  // Hook A/B testing:
-  // - true: one topic spawns multiple hook-variant runs (3-5 videos)
-  // - false: legacy single-hook path
-  ENABLE_HOOK_AB_TESTING: z
-    .enum(["true", "false"])
-    .default("true")
-    .transform((v) => v === "true"),
-  // Number of hook variants/videos to test per topic.
-  HOOK_AB_VARIANTS: z.coerce.number().int().min(3).max(5).default(3),
-  // Automatically enqueue upload for each completed A/B run variant.
-  HOOK_AB_AUTO_UPLOAD: z
-    .enum(["true", "false"])
-    .default("true")
-    .transform((v) => v === "true"),
-  // Privacy used by auto-uploaded A/B variants.
-  HOOK_AB_UPLOAD_PRIVACY: z
-    .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
-    .default("PUBLIC"),
-  // Automatically upload any run when pipeline reaches DONE.
-  AUTO_UPLOAD_ON_PIPELINE_DONE: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((v) => v === "true"),
-  // Privacy used by pipeline-completion auto-upload.
-  AUTO_UPLOAD_PRIVACY: z
-    .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
-    .default("PUBLIC"),
-  // Delay upload by N minutes after pipeline completion.
-  // 0 means enqueue upload immediately.
-  AUTO_UPLOAD_DELAY_MINUTES: z.coerce.number().int().min(0).default(0),
-  // Cron schedule for auto-sync of YouTube analytics. Default: every 6 hours.
-  // Set to "" to disable the scheduler entirely.
-  ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),
-  // When false, this process never starts the analytics scheduler.
-  ENABLE_ANALYTICS_CRON: z
-    .enum(["true", "false"])
-    .default("true")
-    .transform((v) => v === "true"),
-});
+function isValidEncryptionKey(value: string): boolean {
+  try {
+    const buf = /^[0-9a-fA-F]{64}$/.test(value)
+      ? Buffer.from(value, "hex")
+      : Buffer.from(value, "base64");
+    return buf.length === 32;
+  } catch {
+    return false;
+  }
+}
+
+const schema = z
+  .object({
+    NODE_ENV: z
+      .enum(["development", "production", "test"])
+      .default("development"),
+    DATABASE_URL: z.string().url(),
+    REDIS_URL: z.string().url(),
+    AI_SERVICE_URL: z.string().url(),
+    STORAGE_PATH: z.string().default("/storage"),
+    WORKER_ROLE: z
+      .enum(["all", "video", "upload", "enrichment"])
+      .default("all"),
+    WORKER_CONCURRENCY: z.coerce.number().int().min(1).default(1),
+    UPLOAD_WORKER_CONCURRENCY: z.coerce.number().int().min(1).default(1),
+    ENRICHMENT_WORKER_CONCURRENCY: z.coerce.number().int().min(1).default(2),
+    VIDEO_DOWNLOAD_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(6),
+    CLIP_PREP_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
+    MAX_RETRIES_PER_STAGE: z.coerce.number().int().min(0).max(5).default(2),
+    YOUTUBE_CLIENT_ID: z.string().optional(),
+    YOUTUBE_CLIENT_SECRET: z.string().optional(),
+    YOUTUBE_REDIRECT_URI: z
+      .string()
+      .url()
+      .default("http://localhost:4000/auth/youtube/callback"),
+    YOUTUBE_TOKEN_ENCRYPTION_KEY: z.string().optional(),
+    ENABLE_THUMBNAIL_AGENT: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    ENABLE_HOOK_AB_TESTING: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    HOOK_AB_VARIANTS: z.coerce.number().int().min(3).max(5).default(3),
+    HOOK_AB_AUTO_UPLOAD: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    HOOK_AB_UPLOAD_PRIVACY: z
+      .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
+      .default("PUBLIC"),
+    AUTO_UPLOAD_ON_PIPELINE_DONE: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    AUTO_UPLOAD_PRIVACY: z
+      .enum(["PRIVATE", "UNLISTED", "PUBLIC"])
+      .default("PUBLIC"),
+    AUTO_UPLOAD_DELAY_MINUTES: z.coerce.number().int().min(0).default(0),
+    ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),
+    ENABLE_ANALYTICS_CRON: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+  })
+  .superRefine((value, ctx) => {
+    if (value.HOOK_AB_AUTO_UPLOAD && !value.ENABLE_HOOK_AB_TESTING) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["HOOK_AB_AUTO_UPLOAD"],
+        message: "requires ENABLE_HOOK_AB_TESTING=true",
+      });
+    }
+
+    const youtubeConfigured =
+      !!value.YOUTUBE_CLIENT_ID || !!value.YOUTUBE_CLIENT_SECRET;
+    if (youtubeConfigured && !value.YOUTUBE_TOKEN_ENCRYPTION_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["YOUTUBE_TOKEN_ENCRYPTION_KEY"],
+        message: "required when YouTube OAuth is configured",
+      });
+      return;
+    }
+
+    if (
+      value.YOUTUBE_TOKEN_ENCRYPTION_KEY &&
+      !isValidEncryptionKey(value.YOUTUBE_TOKEN_ENCRYPTION_KEY)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["YOUTUBE_TOKEN_ENCRYPTION_KEY"],
+        message:
+          "must be a 32-byte key encoded as base64 or 64-char hex",
+      });
+    }
+  });
 
 const parsed = schema.safeParse(process.env);
 if (!parsed.success) {

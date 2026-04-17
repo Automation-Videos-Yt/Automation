@@ -17,7 +17,17 @@ export type RunFeatures = {
   enableHookVariants: boolean;
 };
 
+export type VoiceTierOverride = "economy" | "premium" | "elite";
+
+export type RunControlOverrides = {
+  forceVoiceTier?: VoiceTierOverride;
+  forceSkipThumbnail?: boolean;
+  sourceAction?: string;
+  iteration?: number;
+};
+
 export type VideoJobData = {
   runId: string;
   features?: RunFeatures;
+  control?: RunControlOverrides;
 };

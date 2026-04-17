@@ -1,7 +1,6 @@
 import { runAgent } from "../clients/aiClient";
 import { loadTimestamp } from "../cache/cache-resume";
 import {
-  buildFallbackScenesFromNarration,
   completeStage,
   createStageErrorHandler,
   getNarration,
@@ -15,6 +14,49 @@ import type { PipelineStage, TimestampOutput } from "./types";
 
 const STAGE = "TIMESTAMP" as const;
 const AGENT = "timestamp";
+
+function buildFallbackScenesFromNarration(opts: {
+  narration: string;
+  totalDurationSec: number;
+  targetSceneSec: number;
+}) {
+  const cleaned = opts.narration.replace(/\s+/g, " ").trim();
+  const totalDurationSec = Math.max(
+    0.5,
+    opts.totalDurationSec || opts.targetSceneSec || 6,
+  );
+
+  if (!cleaned) {
+    return [{ index: 0, start: 0, end: totalDurationSec, text: "" }];
+  }
+
+  const sentenceParts = cleaned
+    .split(/(?<=[.!?।])\s+|\n+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const parts = sentenceParts.length > 0 ? sentenceParts : [cleaned];
+
+  const desiredScenes = Math.max(
+    1,
+    Math.ceil(totalDurationSec / Math.max(1, opts.targetSceneSec)),
+  );
+  const chunkSize = Math.max(1, Math.ceil(parts.length / desiredScenes));
+
+  const sceneTexts: string[] = [];
+  for (let i = 0; i < parts.length; i += chunkSize) {
+    sceneTexts.push(parts.slice(i, i + chunkSize).join(" "));
+  }
+
+  const perSceneSec = totalDurationSec / sceneTexts.length;
+  return sceneTexts.map((text, index) => {
+    const start = index * perSceneSec;
+    const end =
+      index === sceneTexts.length - 1
+        ? totalDurationSec
+        : (index + 1) * perSceneSec;
+    return { index, start, end, text };
+  });
+}
 
 export const timestampStage: PipelineStage = {
   name: STAGE,

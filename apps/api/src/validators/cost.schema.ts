@@ -23,5 +23,20 @@ export const runCostHistoryQuerySchema = z.object({
   refreshAnalysis: booleanQuerySchema.optional().default(false),
 });
 
+export const executeCostActionBodySchema = z.object({
+  action: z
+    .enum([
+      "APPROVE_PIPELINE",
+      "REGENERATE_HOOK",
+      "MODIFY_SCRIPT",
+      "CHANGE_VOICE_TIER",
+      "SKIP_THUMBNAIL",
+      "CHANGE_TOPIC",
+    ])
+    .optional(),
+  forceReanalyze: z.boolean().optional().default(true),
+});
+
 export type RunCostQuery = z.infer<typeof runCostQuerySchema>;
 export type RunCostHistoryQuery = z.infer<typeof runCostHistoryQuerySchema>;
+export type ExecuteCostActionBody = z.infer<typeof executeCostActionBodySchema>;

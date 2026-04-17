@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import {
   AnalyticsServiceError,
+  getOperationsMetrics,
   getRunAnalytics,
   syncAllAnalytics,
   syncRunAnalytics,
@@ -53,6 +54,22 @@ export async function getRunAnalyticsController(
 ) {
   try {
     const data = await getRunAnalytics(req.params.id);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getOperationsMetricsController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const rawDays =
+      typeof req.query.days === "string" ? Number(req.query.days) : 28;
+    const days = Number.isFinite(rawDays) ? rawDays : 28;
+    const data = await getOperationsMetrics(days);
     res.json(data);
   } catch (err) {
     next(err);

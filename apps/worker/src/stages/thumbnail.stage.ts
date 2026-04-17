@@ -10,7 +10,6 @@ import {
   getScript,
   getTopic,
   startStage,
-  thumbnailTierFromScore,
   withAgentLog,
 } from "./helpers";
 import type { PipelineStage, ThumbnailOutput } from "./types";
@@ -18,11 +17,33 @@ import type { PipelineStage, ThumbnailOutput } from "./types";
 const STAGE = "THUMBNAIL" as const;
 const AGENT = "thumbnail";
 
+function thumbnailTierFromScore(score: number): {
+  size: string;
+  quality: "low" | "medium" | "high";
+} {
+  if (score >= 7.5) return { size: "1536x1024", quality: "medium" };
+  if (score >= 5) return { size: "1024x1024", quality: "medium" };
+  return { size: "1024x1024", quality: "low" };
+}
+
 export const thumbnailStage: PipelineStage = {
   name: STAGE,
   async shouldSkip(context) {
-    if (!context.cache.features.enableThumbnail || !context.config.ENABLE_THUMBNAIL_AGENT) {
-      context.logger.info({ stage: STAGE, runId: context.runId }, "Stage skipped");
+    if (context.cache.control?.forceSkipThumbnail) {
+      context.logger.info(
+        { stage: STAGE, runId: context.runId, reason: "forced-skip" },
+        "Stage skipped",
+      );
+      return true;
+    }
+    if (
+      !context.cache.features.enableThumbnail ||
+      !context.config.ENABLE_THUMBNAIL_AGENT
+    ) {
+      context.logger.info(
+        { stage: STAGE, runId: context.runId },
+        "Stage skipped",
+      );
       return true;
     }
     return false;
@@ -57,10 +78,19 @@ export const thumbnailStage: PipelineStage = {
     };
 
     try {
-      const thumbnail = await withAgentLog(context.prisma, context.runId, AGENT, thumbnailInput, () =>
-        runAgent<typeof thumbnailInput, ThumbnailOutput>(AGENT, thumbnailInput, {
-          runId: context.runId,
-        }),
+      const thumbnail = await withAgentLog(
+        context.prisma,
+        context.runId,
+        AGENT,
+        thumbnailInput,
+        () =>
+          runAgent<typeof thumbnailInput, ThumbnailOutput>(
+            AGENT,
+            thumbnailInput,
+            {
+              runId: context.runId,
+            },
+          ),
       );
 
       await context.prisma.video.update({

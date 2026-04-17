@@ -20,6 +20,7 @@ type SegmentRange = {
 };
 
 const SENTENCE_GAP_SEC = 0.5;
+const PAUSE_BREAK_SEC = 0.35;
 const MIN_CUE_DURATION_SEC = 1.0;
 const MAX_CUE_DURATION_SEC = 3.0;
 const MIN_WORDS_PER_CUE = 3;
@@ -113,6 +114,15 @@ function isClauseEnd(word: string): boolean {
 
 function isConnector(word: string): boolean {
   return CONNECTOR_WORDS.has(normalizeToken(word));
+}
+
+function looksLikeSentenceStart(word: string): boolean {
+  const trimmed = word.trim();
+  if (!trimmed) return false;
+  const alpha = trimmed.match(/[A-Za-z]/);
+  if (!alpha) return false;
+  const idx = alpha.index ?? -1;
+  return idx >= 0 && trimmed.charAt(idx) === trimmed.charAt(idx).toUpperCase();
 }
 
 function safeGapSec(curr: WordSpan, next: WordSpan): number {
@@ -229,7 +239,9 @@ function buildInitialRanges(
     const current = words[i];
     const next = words[i + 1];
     const sentenceBreak = isSentenceEnd(current.word) || sentenceHints.has(i);
-    const gapBreak = safeGapSec(current, next) > SENTENCE_GAP_SEC;
+    const gap = safeGapSec(current, next);
+    const gapBreak = gap > SENTENCE_GAP_SEC;
+    const pauseBreak = gap >= PAUSE_BREAK_SEC && count >= MIN_WORDS_PER_CUE;
 
     // Priority order: sentence boundary -> gap -> max words.
     if (sentenceBreak) {
@@ -238,6 +250,11 @@ function buildInitialRanges(
       continue;
     }
     if (gapBreak) {
+      ranges.push({ startIdx, endIdx: i, splitReasonToNext: "gap" });
+      startIdx = i + 1;
+      continue;
+    }
+    if (pauseBreak) {
       ranges.push({ startIdx, endIdx: i, splitReasonToNext: "gap" });
       startIdx = i + 1;
       continue;
@@ -536,7 +553,8 @@ function findInternalSentenceBoundary(tokens: string[]): number {
 
     const leftCount = i + 1;
     const rightCount = tokens.length - leftCount;
-    if (leftCount >= 2 && rightCount >= 2) {
+    const nextStartsSentence = looksLikeSentenceStart(tokens[i + 1]);
+    if (leftCount >= 2 && rightCount >= 2 && nextStartsSentence) {
       return i;
     }
   }

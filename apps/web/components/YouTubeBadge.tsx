@@ -23,6 +23,8 @@ export function YouTubeBadge() {
     return (
       <a
         href={api.youtubeConnectUrl()}
+        target="_blank"
+        rel="noopener noreferrer"
         className="text-xs rounded-md bg-red-500/20 border border-red-500/40 text-red-200 px-3 py-1.5 hover:bg-red-500/30"
       >
         Connect YouTube
@@ -34,7 +36,9 @@ export function YouTubeBadge() {
     <div className="flex items-center gap-2">
       <div className="text-xs">
         <div className="text-emerald-400">● YouTube connected</div>
-        <div className="text-white/50">{data.channelTitle ?? data.channelId}</div>
+        <div className="text-white/50">
+          {data.channelTitle ?? data.channelId}
+        </div>
       </div>
       <button
         onClick={() => disconnect.mutate()}

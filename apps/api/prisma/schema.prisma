@@ -58,6 +58,12 @@ model PipelineRun {
   status            RunStatus     @default(QUEUED)
   currentAgent      String?
   errorMessage      String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  failedStage       PipelineStage?
+  stageFailureReason String?
+  stageFailureMeta  Json?
+  stageRetryCounts  Json?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 

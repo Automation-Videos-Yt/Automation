@@ -1,6 +1,7 @@
 import { prisma } from "../db/prisma";
 import { enrichmentQueue } from "../queues/enrichmentQueue";
 import { scoped } from "../lib/logger";
+export { getOperationsMetrics } from "./operations-metrics.service";
 
 const log = scoped("analytics-svc");
 

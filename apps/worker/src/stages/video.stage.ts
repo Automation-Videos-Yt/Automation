@@ -68,8 +68,8 @@ export const videoStage: PipelineStage = {
     };
 
     const cachedMeta = await loadVideoMeta(context.runId);
-    const downloadLimit = pLimit(6);
-    const prepLimit = pLimit(2);
+    const downloadLimit = pLimit(context.config.VIDEO_DOWNLOAD_CONCURRENCY);
+    const prepLimit = pLimit(context.config.CLIP_PREP_CONCURRENCY);
     const sortedScenes = [...selection.scenes].sort((left, right) => left.index - right.index);
 
     async function processScene(scene: SelectedClipOut): Promise<string> {

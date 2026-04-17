@@ -72,6 +72,11 @@ const ITERATION_CONTROL_REASONS = [
 const MAX_CONTROLLER_ITERATIONS = 3;
 const NORMALIZED_COST_CAP_USD = 0.2;
 const MIN_REWARD_IMPROVEMENT_PCT = 0.02;
+const CTR_ACTION_THRESHOLD = 0.5;
+const RETENTION_ACTION_THRESHOLD = 0.45;
+const APPROVAL_CTR_THRESHOLD = 0.55;
+const APPROVAL_RETENTION_THRESHOLD = 0.5;
+const APPROVAL_COST_THRESHOLD = 0.4;
 
 export type CostAction = (typeof COST_ACTIONS)[number];
 export type MainCostDriver = (typeof COST_DRIVERS)[number];
@@ -122,9 +127,11 @@ const COST_ANALYSIS_PROMPT = ChatPromptTemplate.fromMessages([
       "Objective: maximize reward = (CTR_score*0.5 + retention_score*0.5) - normalized_cost.",
       "Use prediction scores (0..1), current cost, current assets, and memory patterns to decide actions.",
       "You may return one or multiple actions when they are complementary.",
-      "Policy guidance: if CTR<0.4 prioritize hook; if retention<0.4 prioritize script; if both<0.4 change topic.",
+      "Policy guidance: if CTR<0.5 prioritize hook; if retention<0.45 prioritize script; if both weak change topic.",
+      "Conservative policy: if CTR>=0.55 and retention>=0.5 and normalized_cost<0.4, prefer APPROVE_PIPELINE.",
       "If cost is high and performance is weak, prefer cost-down actions (voice downgrade, skip thumbnail).",
       "If performance is strong and ROI supports it, quality upgrades are acceptable.",
+      "Do not output disruptive actions when the loop is converged or max iterations has been reached.",
       "Stop loop when iteration>=max_iterations, reward improvement <2%, or APPROVE_PIPELINE is selected.",
       "Return strict JSON only with the required schema.",
     ].join(" "),
@@ -484,6 +491,27 @@ function normalizeCost(totalUsd: number): number {
   return Math.max(0, Math.min(1, totalUsd / NORMALIZED_COST_CAP_USD));
 }
 
+function shouldPreferApproval(
+  cost: CostSnapshot,
+  context: CostDecisionContext,
+): boolean {
+  const ctrScore =
+    context.pipeline.ctrScore ??
+    normalizeScore((context.history.avgCtr ?? 4) / 10) ??
+    0.4;
+  const retentionScore =
+    context.pipeline.retentionScore ??
+    normalizeScore((context.history.avgRetention ?? 50) / 100) ??
+    0.5;
+
+  const neutralOrBetter =
+    ctrScore >= APPROVAL_CTR_THRESHOLD &&
+    retentionScore >= APPROVAL_RETENTION_THRESHOLD;
+  const lowCost = normalizeCost(cost.totalUsd) < APPROVAL_COST_THRESHOLD;
+
+  return neutralOrBetter && lowCost && !context.history.nicheSaturation;
+}
+
 function summarizeScript(
   body: string | null | undefined,
   cta: string | null | undefined,
@@ -636,8 +664,8 @@ function buildHeuristicDecision(
   const longScript = wordCount > wordBudget;
   const prior = new Set(context.previousActions);
 
-  const lowCtr = (ctrScore ?? 0.4) < 0.4;
-  const lowRetention = (retentionScore ?? 0.5) < 0.4;
+  const lowCtr = (ctrScore ?? 0.4) < CTR_ACTION_THRESHOLD;
+  const lowRetention = (retentionScore ?? 0.5) < RETENTION_ACTION_THRESHOLD;
   const bothWeak = lowCtr && lowRetention;
   const weightedPerformance = ((ctrScore ?? 0.4) + (retentionScore ?? 0.5)) / 2;
   const highCost = cost.totalUsd >= 0.12;
@@ -1142,10 +1170,35 @@ function persistIterationState(params: {
 function normalizeAnalysisOutput(
   analysis: CostAnalysis,
   loopSignals: LoopSignals,
+  context: CostDecisionContext,
+  cost: CostSnapshot,
 ): CostAnalysis {
   const actions = dedupeActions(analysis.actions);
-  const safeActions: CostAction[] =
+  let safeActions: CostAction[] =
     actions.length > 0 ? actions : ["APPROVE_PIPELINE"];
+
+  const ctrScore =
+    context.pipeline.ctrScore ??
+    normalizeScore((context.history.avgCtr ?? 4) / 10) ??
+    0.4;
+  const retentionScore =
+    context.pipeline.retentionScore ??
+    normalizeScore((context.history.avgRetention ?? 50) / 100) ??
+    0.5;
+  const needsIntervention =
+    ctrScore < CTR_ACTION_THRESHOLD ||
+    retentionScore < RETENTION_ACTION_THRESHOLD ||
+    context.history.nicheSaturation;
+
+  const forceApprove =
+    loopSignals.maxIterationsReached ||
+    shouldPreferApproval(cost, context) ||
+    (loopSignals.converged && !needsIntervention);
+
+  if (forceApprove && !safeActions.includes("APPROVE_PIPELINE")) {
+    safeActions = ["APPROVE_PIPELINE"];
+  }
+
   const confidence = Math.max(0, Math.min(1, analysis.confidence));
   const normalizedReason = selectIterationReason({
     actions: safeActions,
@@ -1161,10 +1214,16 @@ function normalizeAnalysisOutput(
         ? rawPattern.trim()
         : null;
 
+  const reasoning =
+    forceApprove && safeActions[0] === "APPROVE_PIPELINE"
+      ? "Auto-stabilized to APPROVE_PIPELINE because current reward is converged or cost/performance is already in an acceptable range."
+      : analysis.reasoning;
+
   return {
     ...analysis,
     actions: safeActions,
     confidence: round4(confidence),
+    reasoning,
     iteration_control: {
       should_continue: normalizedShouldContinue,
       reason: normalizedReason,
@@ -1266,6 +1325,8 @@ async function analyzeCostWithLangChain(
         analysis: normalizeAnalysisOutput(
           buildHeuristicDecision(cost, context),
           loopSignals,
+          context,
+          cost,
         ),
         model: "heuristic",
       });
@@ -1345,7 +1406,12 @@ async function analyzeCostWithLangChain(
         });
 
         result = {
-          analysis: normalizeAnalysisOutput(analysis, loopSignals),
+          analysis: normalizeAnalysisOutput(
+            analysis,
+            loopSignals,
+            context,
+            cost,
+          ),
           model: env.OPENAI_MODEL_COST_ANALYSIS,
         };
         costAnalysisCache.set(cacheKey, {
@@ -1381,6 +1447,8 @@ async function analyzeCostWithLangChain(
         analysis: normalizeAnalysisOutput(
           buildHeuristicDecision(cost, context),
           loopSignals,
+          context,
+          cost,
         ),
         model: "heuristic",
       };

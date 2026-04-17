@@ -5,6 +5,7 @@ import { prisma } from "../db/prisma";
 import { env } from "../config/env";
 import { buildAuthUrl, oauthClient } from "../integrations/youtube/oauth";
 import { scoped } from "../lib/logger";
+import { encryptSecret } from "../lib/secret-crypto";
 
 const log = scoped("yt-oauth");
 
@@ -90,16 +91,16 @@ export async function oauthCallback(
         id: "default",
         channelId,
         channelTitle,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
+        accessToken: encryptSecret(tokens.access_token),
+        refreshToken: encryptSecret(tokens.refresh_token),
         scope: tokens.scope ?? "",
         tokenExpiresAt: expiresAt,
       },
       update: {
         channelId,
         channelTitle,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
+        accessToken: encryptSecret(tokens.access_token),
+        refreshToken: encryptSecret(tokens.refresh_token),
         scope: tokens.scope ?? "",
         tokenExpiresAt: expiresAt,
       },

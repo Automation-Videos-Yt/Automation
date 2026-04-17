@@ -354,12 +354,19 @@ Run detail page includes a dedicated Cost Analysis card with:
 | ------ | ----------------------- | ---------------------------------------------------------------------- |
 | `GET`  | `/cost/run/:id`         | Current run cost + control analysis output                             |
 | `GET`  | `/cost/run/:id/history` | Cost timeline events + latest action plan (`limit`, `refreshAnalysis`) |
+| `POST` | `/cost/run/:id/execute` | Execute one control action (or controller-selected action) and requeue |
 | `GET`  | `/cost/cache/stats`     | In-memory cost analysis cache stats                                    |
 
 Cost query options:
 
 - `refreshAnalysis=true`: bypass cache and regenerate control analysis for this request.
 - `limit=<1..200>` on `/cost/run/:id/history`: bound timeline event count.
+
+Agentic execution:
+
+- `POST /cost/run/:id/execute` executes the selected control action by resetting the run from the mapped stage and requeueing pipeline work.
+- Request body supports optional `action` override and `forceReanalyze`.
+- If no `action` is provided, the controller executes the top recommended action.
 
 ### YouTube Auth
 
@@ -535,6 +542,7 @@ Upload (`POST /pipeline/:id/upload`):
 
 - `ENABLE_LANGCHAIN_COST_ANALYSIS`
 - `OPENAI_MODEL_COST_ANALYSIS`
+- `ENABLE_AGENTIC_COST_AUTOPILOT`
 
 ## Worker Role Modes
 
