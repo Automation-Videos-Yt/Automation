@@ -219,23 +219,33 @@ The system exposes two layers of cost intelligence for each run:
    - Whisper
    - Thumbnail
    - Flat LLM estimate
-2. Decision analysis (LangChain + heuristic fallback)
+2. Autonomous control analysis (LangChain + heuristic fallback)
 
-- Chooses one or more concrete action decisions
+- Chooses one or more concrete actions
 - Includes confidence score
 - Explains cost-performance reasoning
 - Reports primary cost driver + optimization suggestion
 - States expected CTR and retention direction
-- Includes iteration control and learning signal output
+- Includes loop control reason and learning signal output
 
-The decision agent evaluates pipeline outputs, run-level costs, and historical memory/ROI signals. If LangChain is disabled or unavailable, the API returns a deterministic heuristic decision with the same response schema.
+The control agent evaluates pipeline outputs, run-level costs, and historical memory/ROI signals. If LangChain is disabled or unavailable, the API returns a deterministic heuristic action plan with the same response schema.
+
+Optimization objective:
+
+`reward = (CTR_score * 0.5 + retention_score * 0.5) - normalized_cost`
+
+Loop stop conditions:
+
+- `iteration >= max_iterations`
+- reward improvement `< 2%` over previous iteration
+- `APPROVE_PIPELINE` selected
 
 Controller input prediction signals are normalized scores:
 
 - `prediction.ctr_score` in range `0..1`
 - `prediction.retention_score` in range `0..1`
 
-Possible decisions:
+Possible actions:
 
 - `APPROVE_PIPELINE`
 - `REGENERATE_HOOK`
@@ -248,20 +258,20 @@ Example `cost.analysis` response shape:
 
 ```json
 {
-  "decisions": ["REGENERATE_HOOK", "CHANGE_VOICE_TIER"],
+  "actions": ["REGENERATE_HOOK", "CHANGE_VOICE_TIER"],
   "confidence": 0.84,
   "reasoning": "Expected CTR is low for current spend, so improving the opening hook has the highest ROI.",
   "cost_optimization": {
     "main_cost_driver": "voice",
     "suggestion": "Reserve premium voice tiers for high-confidence runs."
   },
-  "performance_expectation": {
+  "expected_impact": {
     "ctr": "increase",
     "retention": "neutral"
   },
   "iteration_control": {
     "should_continue": true,
-    "max_iterations_reached": false
+    "reason": "improvement_expected"
   },
   "learning_signal": {
     "pattern_detected": null,
@@ -275,12 +285,12 @@ Example `cost.analysis` response shape:
 Run detail page includes a dedicated Cost Analysis card with:
 
 - Bucket visualization (voice/whisper/thumbnail/llm)
-- Multi-action decision chips
+- Multi-action chips
 - Confidence indicator
 - Reasoning summary
 - Main cost driver + optimization suggestion
 - CTR/retention expectation chips
-- Iteration control status
+- Iteration control status + reason
 - Learning signal output
 - Cost timeline events
 - Cache health metrics
@@ -321,15 +331,15 @@ Run detail page includes a dedicated Cost Analysis card with:
 
 ### Cost
 
-| Method | Path                    | Purpose                                                             |
-| ------ | ----------------------- | ------------------------------------------------------------------- |
-| `GET`  | `/cost/run/:id`         | Current run cost + decision analysis output                         |
-| `GET`  | `/cost/run/:id/history` | Cost timeline events + latest decision (`limit`, `refreshAnalysis`) |
-| `GET`  | `/cost/cache/stats`     | In-memory cost analysis cache stats                                 |
+| Method | Path                    | Purpose                                                                |
+| ------ | ----------------------- | ---------------------------------------------------------------------- |
+| `GET`  | `/cost/run/:id`         | Current run cost + control analysis output                             |
+| `GET`  | `/cost/run/:id/history` | Cost timeline events + latest action plan (`limit`, `refreshAnalysis`) |
+| `GET`  | `/cost/cache/stats`     | In-memory cost analysis cache stats                                    |
 
 Cost query options:
 
-- `refreshAnalysis=true`: bypass cache and regenerate decision analysis for this request.
+- `refreshAnalysis=true`: bypass cache and regenerate control analysis for this request.
 - `limit=<1..200>` on `/cost/run/:id/history`: bound timeline event count.
 
 ### YouTube Auth

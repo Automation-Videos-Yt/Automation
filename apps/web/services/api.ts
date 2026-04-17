@@ -234,7 +234,7 @@ export type PipelineRun = {
 };
 
 export type CostAnalysis = {
-  decisions: Array<
+  actions: Array<
     | "APPROVE_PIPELINE"
     | "REGENERATE_HOOK"
     | "MODIFY_SCRIPT"
@@ -248,13 +248,13 @@ export type CostAnalysis = {
     main_cost_driver: "voice" | "llm" | "thumbnail" | "video";
     suggestion: string;
   };
-  performance_expectation: {
+  expected_impact: {
     ctr: "increase" | "decrease" | "neutral";
     retention: "increase" | "decrease" | "neutral";
   };
   iteration_control: {
     should_continue: boolean;
-    max_iterations_reached: boolean;
+    reason: "max_iterations" | "converged" | "improvement_expected";
   };
   learning_signal: {
     pattern_detected: string | null;

@@ -12,7 +12,7 @@ function pct(value: number, total: number) {
   return `${((value / total) * 100).toFixed(1)}%`;
 }
 
-function decisionLabel(decision: CostAnalysis["decisions"][number]) {
+function decisionLabel(decision: CostAnalysis["actions"][number]) {
   switch (decision) {
     case "APPROVE_PIPELINE":
       return "Approve pipeline";
@@ -48,14 +48,29 @@ function driverLabel(
   }
 }
 
-function directionTone(value: CostAnalysis["performance_expectation"]["ctr"]) {
+function directionTone(value: CostAnalysis["expected_impact"]["ctr"]) {
   if (value === "increase") return "text-emerald-200 bg-emerald-500/20";
   if (value === "decrease") return "text-red-200 bg-red-500/20";
   return "text-slate-200 bg-slate-500/20";
 }
 
-function directionLabel(value: CostAnalysis["performance_expectation"]["ctr"]) {
+function directionLabel(value: CostAnalysis["expected_impact"]["ctr"]) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function iterationReasonLabel(
+  value: CostAnalysis["iteration_control"]["reason"],
+) {
+  switch (value) {
+    case "max_iterations":
+      return "Max iterations reached";
+    case "converged":
+      return "Converged";
+    case "improvement_expected":
+      return "Improvement expected";
+    default:
+      return value;
+  }
 }
 
 function confidencePct(value: number) {
@@ -211,9 +226,9 @@ export function CostAnalysisCard({
         <div className="rounded border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider text-cyan-200/90">
-              Decisions
+              Actions
             </span>
-            {analysis.decisions.map((decision) => (
+            {analysis.actions.map((decision) => (
               <span
                 key={decision}
                 className="text-xs rounded bg-cyan-400/20 text-cyan-100 px-2 py-1 border border-cyan-300/30"
@@ -244,18 +259,17 @@ export function CostAnalysisCard({
             </span>
             <span
               className={`text-xs px-2 py-1 rounded border border-white/10 ${directionTone(
-                analysis.performance_expectation.ctr,
+                analysis.expected_impact.ctr,
               )}`}
             >
-              CTR {directionLabel(analysis.performance_expectation.ctr)}
+              CTR {directionLabel(analysis.expected_impact.ctr)}
             </span>
             <span
               className={`text-xs px-2 py-1 rounded border border-white/10 ${directionTone(
-                analysis.performance_expectation.retention,
+                analysis.expected_impact.retention,
               )}`}
             >
-              Retention{" "}
-              {directionLabel(analysis.performance_expectation.retention)}
+              Retention {directionLabel(analysis.expected_impact.retention)}
             </span>
           </div>
           <div className="rounded border border-cyan-400/20 bg-cyan-400/5 px-2.5 py-2 space-y-1">
@@ -267,8 +281,7 @@ export function CostAnalysisCard({
               {analysis.iteration_control.should_continue ? "yes" : "no"}
             </div>
             <div className="text-xs text-cyan-100/90">
-              max iterations reached:{" "}
-              {analysis.iteration_control.max_iterations_reached ? "yes" : "no"}
+              reason: {iterationReasonLabel(analysis.iteration_control.reason)}
             </div>
           </div>
           <div className="rounded border border-cyan-400/20 bg-cyan-400/5 px-2.5 py-2 space-y-1">
