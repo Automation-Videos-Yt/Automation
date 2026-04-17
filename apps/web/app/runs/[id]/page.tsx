@@ -1,8 +1,23 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
+import { Badge } from "../../../components/ui/badge";
+import { Button } from "../../../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../../../components/ui/card";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../../../components/ui/tabs";
 import { api, PipelineRun } from "../../../services/api";
 import { UploadCard } from "../../../components/UploadCard";
 import { AnalyticsCard } from "../../../components/AnalyticsCard";
@@ -28,6 +43,22 @@ function languageLabel(code: string): string {
   return LANGUAGE_LABELS[code] ?? code.toUpperCase();
 }
 
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function statusVariant(status: PipelineRun["status"]) {
+  if (status === "COMPLETED") return "success" as const;
+  if (status === "FAILED") return "warning" as const;
+  if (status === "RUNNING") return "default" as const;
+  return "secondary" as const;
+}
+
 const STAGES: PipelineRun["stage"][] = [
   "TOPIC",
   "SCRIPT",
@@ -43,29 +74,52 @@ const STAGES: PipelineRun["stage"][] = [
 
 function StageTimeline({ run }: { run: PipelineRun }) {
   const currentIdx = STAGES.indexOf(run.stage);
+  const progress =
+    run.status === "COMPLETED"
+      ? 100
+      : currentIdx < 0
+        ? 0
+        : Math.round(((currentIdx + 1) / STAGES.length) * 100);
+
   return (
-    <ol className="flex gap-2 flex-wrap">
-      {STAGES.map((s, i) => {
-        const done = i < currentIdx || run.stage === "DONE";
-        const active = i === currentIdx && run.status === "RUNNING";
-        const failed = run.status === "FAILED" && i === currentIdx;
-        const cls = failed
-          ? "bg-red-500/20 text-red-300 border-red-500/40"
-          : done
-            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-            : active
-              ? "bg-yellow-500/20 text-yellow-200 border-yellow-500/40 animate-pulse"
-              : "bg-white/5 text-white/50 border-white/10";
-        return (
-          <li
-            key={s}
-            className={`rounded-md border px-3 py-1 text-xs font-medium ${cls}`}
-          >
-            {s.replace("_", " ")}
-          </li>
-        );
-      })}
-    </ol>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs text-white/55">
+        <span>Pipeline progress</span>
+        <span className="tabular-nums">{progress}%</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+        <div
+          className={`h-full transition-all ${
+            run.status === "FAILED" ? "bg-red-400" : "bg-indigo-400"
+          }`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      <ol className="flex gap-2 flex-wrap">
+        {STAGES.map((s, i) => {
+          const done = i < currentIdx || run.stage === "DONE";
+          const active = i === currentIdx && run.status === "RUNNING";
+          const failed = run.status === "FAILED" && i === currentIdx;
+          const cls = failed
+            ? "bg-red-500/20 text-red-200 border-red-500/40"
+            : done
+              ? "bg-emerald-500/20 text-emerald-200 border-emerald-500/40"
+              : active
+                ? "bg-indigo-500/20 text-indigo-100 border-indigo-400/40 animate-pulse"
+                : "bg-white/5 text-white/50 border-white/10";
+
+          return (
+            <li
+              key={s}
+              className={`rounded-md border px-2.5 py-1 text-[11px] font-medium ${cls}`}
+            >
+              {s.replace("_", " ")}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
@@ -95,6 +149,51 @@ function useRunEvents(runId: string, onEvent: (kind: string) => void) {
     };
     return () => es.close();
   }, [runId, onEvent]);
+}
+
+function StatTile({
+  label,
+  value,
+  accent = "default",
+}: {
+  label: string;
+  value: string;
+  accent?: "default" | "success" | "warning" | "info";
+}) {
+  const accentClass =
+    accent === "success"
+      ? "border-emerald-300/25 bg-emerald-500/10"
+      : accent === "warning"
+        ? "border-amber-300/25 bg-amber-500/10"
+        : accent === "info"
+          ? "border-indigo-300/25 bg-indigo-500/10"
+          : "border-white/10 bg-white/[0.03]";
+
+  return (
+    <div className={`rounded-xl border px-3.5 py-3 ${accentClass}`}>
+      <div className="text-[11px] uppercase tracking-wide text-white/55">
+        {label}
+      </div>
+      <div className="mt-1 text-base font-semibold text-white">{value}</div>
+    </div>
+  );
+}
+
+function EmptyPanel({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+    </Card>
+  );
 }
 
 export default function RunDetailPage() {
@@ -168,283 +267,526 @@ export default function RunDetailPage() {
     },
   });
 
-  if (!run) return <div>Loading...</div>;
+  const logSummary = useMemo(() => {
+    const entries = logs ?? [];
+    let successCount = 0;
+    let failedCount = 0;
+    let totalDurationMs = 0;
+
+    for (const entry of entries) {
+      totalDurationMs += entry.durationMs;
+      if (entry.status === "SUCCESS") successCount += 1;
+      else failedCount += 1;
+    }
+
+    return {
+      total: entries.length,
+      successCount,
+      failedCount,
+      totalDurationMs,
+    };
+  }, [logs]);
+
+  if (!run) {
+    return (
+      <div className="space-y-4">
+        <div className="h-40 rounded-2xl bg-white/5 animate-pulse" />
+        <div className="h-10 rounded-lg bg-white/5 animate-pulse" />
+        <div className="h-64 rounded-2xl bg-white/5 animate-pulse" />
+      </div>
+    );
+  }
 
   const canCancel = run.status === "QUEUED" || run.status === "RUNNING";
+  const canRetry = run.status === "FAILED";
+  const hasVideo = Boolean(run.video?.videoPath);
+  const uploadCompleted = run.upload?.status === "COMPLETED";
+  const estimatedSpend = run.cost ? `$${run.cost.totalUsd.toFixed(3)}` : "—";
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-white/50 text-sm">Run · {run.id}</div>
-        <h1 className="text-2xl font-semibold mt-1">{run.niche}</h1>
-        <div className="text-xs text-white/50 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>language: {languageLabel(run.languageCode)}</span>
-          <span>target duration: {run.targetDurationSec}s</span>
-          {run.cost && run.cost.totalUsd > 0 && (
-            <span
-              title={`voice $${run.cost.voiceUsd.toFixed(4)} · whisper $${run.cost.whisperUsd.toFixed(4)} · thumbnail $${run.cost.thumbnailUsd.toFixed(4)} · llm $${run.cost.llmUsd.toFixed(4)}`}
-            >
-              spend:{" "}
-              <span className="tabular-nums text-white/70">
-                ${run.cost.totalUsd.toFixed(3)}
-              </span>
-            </span>
-          )}
-          {run.cost?.source.voiceProvider && (
-            <span className="text-white/40">
-              voice: {run.cost.source.voiceProvider}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <StageTimeline run={run} />
-
-      <CostAnalysisCard runId={run.id} initialCost={run.cost ?? null} />
-
-      {canCancel && (
-        <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => cancel.mutate()}
-              disabled={cancel.isPending}
-              className="rounded-md bg-yellow-300 text-black text-sm px-3 py-1.5 font-medium disabled:opacity-50"
-            >
-              {cancel.isPending ? "Canceling…" : "Cancel run"}
-            </button>
-            <span className="text-xs text-white/70">
-              stops queued/in-progress pipeline execution and blocks pending
-              scheduled upload jobs
-            </span>
+      <Card className="relative overflow-hidden border-white/15 bg-gradient-to-br from-white/[0.08] via-white/[0.03] to-transparent">
+        <div className="absolute -top-20 -right-12 h-44 w-44 rounded-full bg-indigo-500/15 blur-3xl" />
+        <CardHeader className="relative pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-white/45">
+                Run
+              </div>
+              <CardTitle className="mt-1 text-2xl tracking-tight">
+                {run.niche}
+              </CardTitle>
+              <CardDescription className="mt-2 font-mono text-[11px] text-white/45">
+                {run.id}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+              <Badge variant="secondary">{run.stage.replace("_", " ")}</Badge>
+              {run.currentAgent && (
+                <Badge variant="secondary">agent: {run.currentAgent}</Badge>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        </CardHeader>
 
-      {run.status === "FAILED" && (
-        <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 space-y-2">
-          {run.errorMessage && (
-            <div className="text-sm text-red-200">{run.errorMessage}</div>
-          )}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => retry.mutate()}
-              disabled={retry.isPending}
-              className="rounded-md bg-white text-black text-sm px-3 py-1.5 font-medium disabled:opacity-50"
-            >
-              {retry.isPending ? "Re-queuing…" : "Retry from last success"}
-            </button>
-            <span className="text-xs text-white/60">
-              cached stages are reused — only the failing step (and anything
-              after) re-runs
-            </span>
+        <CardContent className="relative space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatTile
+              label="Language"
+              value={languageLabel(run.languageCode)}
+            />
+            <StatTile
+              label="Target Duration"
+              value={`${run.targetDurationSec}s`}
+              accent="info"
+            />
+            <StatTile
+              label="Estimated Spend"
+              value={estimatedSpend}
+              accent="warning"
+            />
+            <StatTile
+              label="Created"
+              value={formatDateTime(run.createdAt)}
+              accent={run.status === "COMPLETED" ? "success" : "default"}
+            />
           </div>
-        </div>
-      )}
 
-      {run.topic && (
-        <section className="rounded-md border border-white/10 p-4">
-          <h2 className="font-semibold mb-2">Topic</h2>
-          <div className="font-medium">{run.topic.title}</div>
-          <div className="text-sm text-white/70 mt-1">
-            Angle: {run.topic.angle}
-          </div>
-          <div className="text-sm text-white/60 mt-1">
-            {run.topic.rationale}
-          </div>
-        </section>
-      )}
+          <StageTimeline run={run} />
 
-      {run.script && (
-        <section className="rounded-md border border-white/10 p-4 space-y-2">
-          <h2 className="font-semibold">
-            Script · {run.script.wordCount} words · ~
-            {run.script.durationEstimateSec}s
-          </h2>
-          <p className="text-sm">
-            <span className="text-white/50">Hook:</span> {run.script.hook}
-          </p>
-          <p className="text-sm whitespace-pre-wrap">{run.script.body}</p>
-          <p className="text-sm">
-            <span className="text-white/50">CTA:</span> {run.script.cta}
-          </p>
-        </section>
-      )}
-
-      {run.prediction && (
-        <PredictionCard
-          prediction={run.prediction}
-          actual={analyticsData?.latest ?? null}
-        />
-      )}
-
-      {experiment && experiment.runs.length > 1 && (
-        <HookExperimentCard experiment={experiment} currentRunId={run.id} />
-      )}
-
-      {run.hookVariants && run.hookVariants.length > 0 && (
-        <section className="rounded-md border border-white/10 p-4 space-y-2">
-          <h2 className="font-semibold">Hook variants</h2>
-          <ul className="space-y-2">
-            {run.hookVariants.map((v) => (
-              <li
-                key={v.id}
-                className={`rounded border p-3 ${
-                  v.chosen
-                    ? "border-emerald-500/40 bg-emerald-500/5"
-                    : "border-white/10"
-                }`}
+          <div className="flex flex-wrap items-center gap-2">
+            {canCancel && (
+              <Button
+                variant="secondary"
+                onClick={() => cancel.mutate()}
+                disabled={cancel.isPending}
+                className="border-amber-300/30 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm">{v.text}</div>
-                  <div className="text-xs tabular-nums text-white/60 shrink-0">
-                    {v.score.toFixed(1)}
-                    {v.chosen && (
-                      <span className="ml-2 text-emerald-400">✓ chosen</span>
-                    )}
+                {cancel.isPending ? "Canceling..." : "Cancel run"}
+              </Button>
+            )}
+
+            {canRetry && (
+              <Button onClick={() => retry.mutate()} disabled={retry.isPending}>
+                {retry.isPending ? "Re-queuing..." : "Retry from last success"}
+              </Button>
+            )}
+
+            {run.upload?.videoUrl && (
+              <a
+                href={run.upload.videoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white/90 hover:bg-white/20"
+              >
+                Open on YouTube
+              </a>
+            )}
+
+            <div className="ml-auto text-xs text-white/50">
+              updated {formatDateTime(run.updatedAt)}
+            </div>
+          </div>
+
+          {run.status === "FAILED" && run.errorMessage && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+              {run.errorMessage}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="overview" className="space-y-3">
+        <TabsList className="h-auto w-full justify-start gap-1 flex-wrap">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="content">Content</TabsTrigger>
+          <TabsTrigger value="media">Media</TabsTrigger>
+          <TabsTrigger value="insights">Insights</TabsTrigger>
+          <TabsTrigger value="logs">Logs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
+          <CostAnalysisCard runId={run.id} initialCost={run.cost ?? null} />
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  Current output snapshot
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div>
+                  <div className="text-xs text-white/50">Topic</div>
+                  <div className="mt-0.5 text-white/90">
+                    {run.topic?.title ?? "Not generated yet"}
                   </div>
                 </div>
-                {v.reasoning && (
-                  <div className="text-xs text-white/50 mt-1">
-                    {v.reasoning}
+                <div>
+                  <div className="text-xs text-white/50">Hook</div>
+                  <div className="mt-0.5 text-white/90">
+                    {run.script?.hook ?? "Not generated yet"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-white/50">Voice provider</div>
+                  <div className="mt-0.5 text-white/90">
+                    {run.cost?.source.voiceProvider ?? "Pending"}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Pipeline health</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Log events</span>
+                  <span className="tabular-nums">{logSummary.total}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Succeeded</span>
+                  <span className="tabular-nums text-emerald-300">
+                    {logSummary.successCount}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Failed</span>
+                  <span className="tabular-nums text-red-300">
+                    {logSummary.failedCount}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Total stage time</span>
+                  <span className="tabular-nums">
+                    {(logSummary.totalDurationMs / 1000).toFixed(1)}s
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Publish status</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Upload status</span>
+                  <span>{run.upload?.status ?? "Not started"}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Analytics</span>
+                  <span>
+                    {uploadCompleted ? "Available" : "Pending upload"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">Assets ready</span>
+                  <span>{hasVideo ? "Yes" : "No"}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="content" className="space-y-4">
+          {run.topic ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Topic</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                <div className="font-medium text-white">{run.topic.title}</div>
+                <div className="text-white/70">Angle: {run.topic.angle}</div>
+                <div className="text-white/60">{run.topic.rationale}</div>
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyPanel
+              title="Topic not available"
+              description="The topic stage has not completed yet."
+            />
+          )}
+
+          {run.script ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  Script · {run.script.wordCount} words · ~
+                  {run.script.durationEstimateSec}s
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <p>
+                  <span className="text-white/50">Hook:</span> {run.script.hook}
+                </p>
+                <p className="whitespace-pre-wrap text-white/90">
+                  {run.script.body}
+                </p>
+                <p>
+                  <span className="text-white/50">CTA:</span> {run.script.cta}
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyPanel
+              title="Script not available"
+              description="The script stage has not completed yet."
+            />
+          )}
+
+          {run.hookVariants && run.hookVariants.length > 0 ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Hook variants</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <ul className="space-y-2">
+                  {run.hookVariants.map((variant) => (
+                    <li
+                      key={variant.id}
+                      className={`rounded border p-3 ${
+                        variant.chosen
+                          ? "border-emerald-500/40 bg-emerald-500/10"
+                          : "border-white/10 bg-white/[0.03]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm text-white/90">
+                          {variant.text}
+                        </div>
+                        <div className="text-xs tabular-nums text-white/60 shrink-0">
+                          {variant.score.toFixed(1)}
+                          {variant.chosen && (
+                            <span className="ml-2 text-emerald-300">
+                              chosen
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {variant.reasoning && (
+                        <div className="mt-1 text-xs text-white/55">
+                          {variant.reasoning}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyPanel
+              title="Hook variants not available"
+              description="No hook variants were produced for this run."
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="media" className="space-y-4">
+          {run.video ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Final video</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
+                  <video
+                    controls
+                    className="w-full rounded-md bg-black"
+                    src={api.mediaUrl(run.video.videoPath)}
+                  />
+                  {run.video.thumbnailPath ? (
+                    <div className="space-y-1">
+                      <div className="text-xs text-white/50">Thumbnail</div>
+                      <img
+                        src={api.mediaUrl(run.video.thumbnailPath)}
+                        alt="Thumbnail"
+                        className="w-full rounded-md border border-white/10"
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm text-white/60">
+                      Thumbnail not generated.
+                    </div>
+                  )}
+                </div>
+
+                {run.video.title && (
+                  <div>
+                    <div className="text-xs text-white/50">SEO title</div>
+                    <div>{run.video.title}</div>
                   </div>
                 )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
-      {run.scenes && run.scenes.length > 0 && (
-        <section className="rounded-md border border-white/10 p-4 space-y-2">
-          <h2 className="font-semibold">
-            Scenes · {run.scenes.length}{" "}
-            <span className="text-white/50 text-sm font-normal">
-              ({run.scenes.filter((s) => s.clipUrl).length} with stock clip)
-            </span>
-          </h2>
-          <ol className="divide-y divide-white/5">
-            {run.scenes.map((s) => (
-              <li key={s.id} className="py-2 flex gap-3 items-start">
-                <div className="text-xs tabular-nums text-white/50 w-20 shrink-0 pt-0.5">
-                  {fmtDur(s.startSec)} → {fmtDur(s.endSec)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm">{s.text}</div>
-                  <div className="text-xs text-white/50 mt-0.5">
-                    query: <span className="font-mono">{s.query ?? "—"}</span>
-                    {s.clipSource && (
-                      <span className="ml-2">
-                        · {s.clipSource}
-                        {s.clipDurationSec != null &&
-                          ` (${s.clipDurationSec.toFixed(1)}s)`}
+                {run.video.tags && run.video.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {run.video.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="text-xs rounded bg-white/10 px-2 py-0.5"
+                      >
+                        {tag}
                       </span>
-                    )}
-                    {!s.clipUrl && (
-                      <span className="ml-2 text-yellow-400">
-                        · placeholder
-                      </span>
-                    )}
+                    ))}
                   </div>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
-      {run.video && (
-        <section className="rounded-md border border-white/10 p-4 space-y-3">
-          <h2 className="font-semibold">Final video</h2>
-          <div className="grid md:grid-cols-[2fr_1fr] gap-4">
-            <video
-              controls
-              className="w-full rounded-md bg-black"
-              src={api.mediaUrl(run.video.videoPath)}
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyPanel
+              title="Video not available"
+              description="The video stage has not completed yet."
             />
-            {run.video.thumbnailPath && (
-              <div className="space-y-1">
-                <div className="text-xs text-white/50">Thumbnail</div>
-                <img
-                  src={api.mediaUrl(run.video.thumbnailPath)}
-                  alt="Thumbnail"
-                  className="w-full rounded-md border border-white/10"
-                />
-              </div>
-            )}
-          </div>
-          {run.video.title && (
-            <div>
-              <div className="text-xs text-white/50">SEO title</div>
-              <div>{run.video.title}</div>
-            </div>
           )}
-          {run.video.tags && run.video.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {run.video.tags.map((t) => (
-                <span
-                  key={t}
-                  className="text-xs rounded bg-white/10 px-2 py-0.5"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
+
+          {run.scenes && run.scenes.length > 0 ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  Scenes · {run.scenes.length}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ol className="divide-y divide-white/5">
+                  {run.scenes.map((scene) => (
+                    <li
+                      key={scene.id}
+                      className="py-2.5 flex gap-3 items-start"
+                    >
+                      <div className="text-xs tabular-nums text-white/50 w-20 shrink-0 pt-0.5">
+                        {fmtDur(scene.startSec)} {"->"} {fmtDur(scene.endSec)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-white/90">
+                          {scene.text}
+                        </div>
+                        <div className="text-xs text-white/50 mt-0.5">
+                          query:{" "}
+                          <span className="font-mono">
+                            {scene.query ?? "—"}
+                          </span>
+                          {scene.clipSource && (
+                            <span className="ml-2">
+                              · {scene.clipSource}
+                              {scene.clipDurationSec != null &&
+                                ` (${scene.clipDurationSec.toFixed(1)}s)`}
+                            </span>
+                          )}
+                          {!scene.clipUrl && (
+                            <span className="ml-2 text-amber-300">
+                              · placeholder
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyPanel
+              title="Scene timeline not available"
+              description="Scene metadata appears once the video selection stage completes."
+            />
           )}
-        </section>
-      )}
 
-      {run.video && run.status === "COMPLETED" && (
-        <>
-          <AssetActions run={run} />
-          <UploadCard runId={run.id} initial={run.upload ?? null} />
-        </>
-      )}
+          {hasVideo && <AssetActions run={run} />}
+          {hasVideo && run.status === "COMPLETED" && (
+            <UploadCard runId={run.id} initial={run.upload ?? null} />
+          )}
+        </TabsContent>
 
-      {run.upload?.status === "COMPLETED" && (
-        <AnalyticsCard runId={run.id} hasUpload={true} />
-      )}
+        <TabsContent value="insights" className="space-y-4">
+          {run.prediction ? (
+            <PredictionCard
+              prediction={run.prediction}
+              actual={analyticsData?.latest ?? null}
+            />
+          ) : (
+            <EmptyPanel
+              title="Prediction unavailable"
+              description="Prediction data appears after the prediction stage finishes."
+            />
+          )}
 
-      {run.upload?.status === "COMPLETED" && (
-        <FeedbackCard runId={run.id} hasUpload={true} />
-      )}
+          {experiment && experiment.runs.length > 1 ? (
+            <HookExperimentCard experiment={experiment} currentRunId={run.id} />
+          ) : (
+            <EmptyPanel
+              title="Hook experiment unavailable"
+              description="A/B experiment insight appears when the run belongs to a multi-variant experiment."
+            />
+          )}
 
-      <section className="rounded-md border border-white/10 p-4">
-        <h2 className="font-semibold mb-3">Agent log</h2>
-        {logs && logs.length > 0 ? (
-          <table className="w-full text-sm">
-            <thead className="text-white/50">
-              <tr>
-                <th className="text-left py-1">Agent</th>
-                <th className="text-left py-1">Status</th>
-                <th className="text-right py-1">Duration</th>
-                <th className="text-left py-1 pl-4">Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((l) => (
-                <tr key={l.id} className="border-t border-white/5">
-                  <td className="py-1">{l.agent}</td>
-                  <td
-                    className={
-                      l.status === "FAILED"
-                        ? "text-red-400"
-                        : "text-emerald-400"
-                    }
-                  >
-                    {l.status}
-                  </td>
-                  <td className="text-right tabular-nums">{l.durationMs} ms</td>
-                  <td className="pl-4 text-red-300 text-xs">
-                    {l.errorMessage ?? ""}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="text-white/50 text-sm">No logs yet.</div>
-        )}
-      </section>
+          {uploadCompleted ? (
+            <>
+              <AnalyticsCard runId={run.id} hasUpload={true} />
+              <FeedbackCard runId={run.id} hasUpload={true} />
+            </>
+          ) : (
+            <EmptyPanel
+              title="Analytics and feedback pending"
+              description="Upload the video to YouTube and sync analytics to unlock feedback insights."
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="logs" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Agent log</CardTitle>
+              <CardDescription>
+                {logSummary.total} events · {logSummary.successCount} success ·{" "}
+                {logSummary.failedCount} failed
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {logs && logs.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-white/50">
+                      <tr>
+                        <th className="text-left py-1">Agent</th>
+                        <th className="text-left py-1">Status</th>
+                        <th className="text-right py-1">Duration</th>
+                        <th className="text-left py-1 pl-4">Error</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logs.map((entry) => (
+                        <tr key={entry.id} className="border-t border-white/5">
+                          <td className="py-1.5">{entry.agent}</td>
+                          <td
+                            className={
+                              entry.status === "FAILED"
+                                ? "text-red-300"
+                                : "text-emerald-300"
+                            }
+                          >
+                            {entry.status}
+                          </td>
+                          <td className="text-right tabular-nums">
+                            {entry.durationMs} ms
+                          </td>
+                          <td className="pl-4 text-red-200/90 text-xs">
+                            {entry.errorMessage ?? ""}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-sm text-white/60">No logs yet.</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
