@@ -49,23 +49,23 @@ enum UploadPrivacy {
 }
 
 model PipelineRun {
-  id                String        @id @default(cuid())
-  experimentId      String?
-  niche             String
-  languageCode      String        @default("en")
-  targetDurationSec Int           @default(75)
-  stage             PipelineStage @default(QUEUED)
-  status            RunStatus     @default(QUEUED)
-  currentAgent      String?
-  errorMessage      String?
-  startedAt         DateTime?
-  completedAt       DateTime?
-  failedStage       PipelineStage?
+  id                 String         @id @default(cuid())
+  experimentId       String?
+  niche              String
+  languageCode       String         @default("en")
+  targetDurationSec  Int            @default(75)
+  stage              PipelineStage  @default(QUEUED)
+  status             RunStatus      @default(QUEUED)
+  currentAgent       String?
+  errorMessage       String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  failedStage        PipelineStage?
   stageFailureReason String?
-  stageFailureMeta  Json?
-  stageRetryCounts  Json?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  stageFailureMeta   Json?
+  stageRetryCounts   Json?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   topic        Topic?
   script       Script?
