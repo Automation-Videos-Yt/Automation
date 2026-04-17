@@ -12,7 +12,7 @@ function pct(value: number, total: number) {
   return `${((value / total) * 100).toFixed(1)}%`;
 }
 
-function decisionLabel(decision: CostAnalysis["decision"]) {
+function decisionLabel(decision: CostAnalysis["decisions"][number]) {
   switch (decision) {
     case "APPROVE_PIPELINE":
       return "Approve pipeline";
@@ -56,6 +56,11 @@ function directionTone(value: CostAnalysis["performance_expectation"]["ctr"]) {
 
 function directionLabel(value: CostAnalysis["performance_expectation"]["ctr"]) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function confidencePct(value: number) {
+  const bounded = Math.max(0, Math.min(1, value));
+  return `${Math.round(bounded * 100)}%`;
 }
 
 function CostBucket({
@@ -206,10 +211,18 @@ export function CostAnalysisCard({
         <div className="rounded border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider text-cyan-200/90">
-              Decision
+              Decisions
             </span>
-            <span className="text-xs rounded bg-cyan-400/20 text-cyan-100 px-2 py-1 border border-cyan-300/30">
-              {decisionLabel(analysis.decision)}
+            {analysis.decisions.map((decision) => (
+              <span
+                key={decision}
+                className="text-xs rounded bg-cyan-400/20 text-cyan-100 px-2 py-1 border border-cyan-300/30"
+              >
+                {decisionLabel(decision)}
+              </span>
+            ))}
+            <span className="text-[11px] rounded bg-cyan-900/40 text-cyan-200 px-2 py-1 border border-cyan-600/40">
+              confidence {confidencePct(analysis.confidence)}
             </span>
           </div>
           <div className="text-sm text-cyan-100">{analysis.reasoning}</div>
@@ -244,6 +257,33 @@ export function CostAnalysisCard({
               Retention{" "}
               {directionLabel(analysis.performance_expectation.retention)}
             </span>
+          </div>
+          <div className="rounded border border-cyan-400/20 bg-cyan-400/5 px-2.5 py-2 space-y-1">
+            <div className="text-[11px] uppercase tracking-wider text-cyan-200/90">
+              Iteration control
+            </div>
+            <div className="text-xs text-cyan-100/90">
+              should continue:{" "}
+              {analysis.iteration_control.should_continue ? "yes" : "no"}
+            </div>
+            <div className="text-xs text-cyan-100/90">
+              max iterations reached:{" "}
+              {analysis.iteration_control.max_iterations_reached ? "yes" : "no"}
+            </div>
+          </div>
+          <div className="rounded border border-cyan-400/20 bg-cyan-400/5 px-2.5 py-2 space-y-1">
+            <div className="text-[11px] uppercase tracking-wider text-cyan-200/90">
+              Learning signal
+            </div>
+            <div className="text-xs text-cyan-100/90">
+              should store:{" "}
+              {analysis.learning_signal.should_store ? "yes" : "no"}
+            </div>
+            {analysis.learning_signal.pattern_detected && (
+              <div className="text-sm text-white/90">
+                {analysis.learning_signal.pattern_detected}
+              </div>
+            )}
           </div>
         </div>
       ) : (

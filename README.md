@@ -157,12 +157,20 @@ The system exposes two layers of cost intelligence for each run:
    - Thumbnail
    - Flat LLM estimate
 2. Decision analysis (LangChain + heuristic fallback)
-   - Chooses one concrete action decision
-   - Explains cost-performance reasoning
-   - Reports primary cost driver + optimization suggestion
-   - States expected CTR and retention direction
+
+- Chooses one or more concrete action decisions
+- Includes confidence score
+- Explains cost-performance reasoning
+- Reports primary cost driver + optimization suggestion
+- States expected CTR and retention direction
+- Includes iteration control and learning signal output
 
 The decision agent evaluates pipeline outputs, run-level costs, and historical memory/ROI signals. If LangChain is disabled or unavailable, the API returns a deterministic heuristic decision with the same response schema.
+
+Controller input prediction signals are normalized scores:
+
+- `prediction.ctr_score` in range `0..1`
+- `prediction.retention_score` in range `0..1`
 
 Possible decisions:
 
@@ -177,7 +185,8 @@ Example `cost.analysis` response shape:
 
 ```json
 {
-  "decision": "REGENERATE_HOOK",
+  "decisions": ["REGENERATE_HOOK", "CHANGE_VOICE_TIER"],
+  "confidence": 0.84,
   "reasoning": "Expected CTR is low for current spend, so improving the opening hook has the highest ROI.",
   "cost_optimization": {
     "main_cost_driver": "voice",
@@ -186,6 +195,14 @@ Example `cost.analysis` response shape:
   "performance_expectation": {
     "ctr": "increase",
     "retention": "neutral"
+  },
+  "iteration_control": {
+    "should_continue": true,
+    "max_iterations_reached": false
+  },
+  "learning_signal": {
+    "pattern_detected": null,
+    "should_store": true
   }
 }
 ```
@@ -195,10 +212,13 @@ Example `cost.analysis` response shape:
 Run detail page includes a dedicated Cost Analysis card with:
 
 - Bucket visualization (voice/whisper/thumbnail/llm)
-- Decision badge (action to take now)
+- Multi-action decision chips
+- Confidence indicator
 - Reasoning summary
 - Main cost driver + optimization suggestion
 - CTR/retention expectation chips
+- Iteration control status
+- Learning signal output
 - Cost timeline events
 - Cache health metrics
 - Manual refresh button (`refreshAnalysis=true`)

@@ -64,6 +64,7 @@ const COST_DECISIONS = [
 
 const COST_DRIVERS = ["voice", "llm", "thumbnail", "video"] as const;
 const PERFORMANCE_DIRECTIONS = ["increase", "decrease", "neutral"] as const;
+const MAX_CONTROLLER_ITERATIONS = 3;
 
 export type CostDecision = (typeof COST_DECISIONS)[number];
 export type MainCostDriver = (typeof COST_DRIVERS)[number];
@@ -71,7 +72,8 @@ export type PerformanceDirection = (typeof PERFORMANCE_DIRECTIONS)[number];
 export type VoiceTier = "economy" | "premium" | "elite" | "unknown";
 
 const CostAnalysisSchema = z.object({
-  decision: z.enum(COST_DECISIONS),
+  decisions: z.array(z.enum(COST_DECISIONS)).min(1).max(4),
+  confidence: z.number().min(0).max(1),
   reasoning: z
     .string()
     .min(12)
@@ -91,6 +93,14 @@ const CostAnalysisSchema = z.object({
     ctr: z.enum(PERFORMANCE_DIRECTIONS),
     retention: z.enum(PERFORMANCE_DIRECTIONS),
   }),
+  iteration_control: z.object({
+    should_continue: z.boolean(),
+    max_iterations_reached: z.boolean(),
+  }),
+  learning_signal: z.object({
+    pattern_detected: z.string().min(8).max(220).nullable(),
+    should_store: z.boolean(),
+  }),
 });
 
 export type CostAnalysis = z.infer<typeof CostAnalysisSchema>;
@@ -99,13 +109,19 @@ const COST_ANALYSIS_PROMPT = ChatPromptTemplate.fromMessages([
   [
     "system",
     [
-      "You are an AI Cost Optimization and Decision Agent for a YouTube automation system.",
+      "You are an AI Pipeline Control Agent responsible for optimizing and controlling a YouTube automation system.",
       "Your goal is to maximize expected CTR, retention, and engagement while minimizing cost.",
-      "You must choose one concrete action decision, not just analysis.",
-      "Use pipeline outputs, cost breakdown, and historical memory to make the decision.",
+      "You are a decision-making controller, not just an analyzer.",
+      "Use pipeline outputs, cost breakdown, historical memory, and prior decisions.",
+      "You may return multiple actions when they are complementary.",
+      "Prefer low-cost improvements first.",
+      "If predictions are weak, prioritize hook and script fixes.",
+      "If cost is high with weak gains, downgrade expensive components.",
+      "If repeated weak iterations persist, escalate to topic change.",
+      "If iteration_count > 1, avoid repeating the same action unless improvement is expected.",
+      "Assume prediction.ctr_score and prediction.retention_score are normalized scores in the range 0-1.",
+      "When no changes are needed, include APPROVE_PIPELINE.",
       "Prefer historically strong patterns and avoid poor ROI patterns.",
-      "When spend is high but expected performance is weak, prioritize cost-saving actions.",
-      "When performance risk is high, prioritize actions that improve hook/script/topic quality.",
       "Return only structured JSON with the required schema.",
     ].join(" "),
   ],
@@ -122,7 +138,10 @@ const COST_ANALYSIS_PROMPT = ChatPromptTemplate.fromMessages([
       "Historical memory:",
       "{historyJson}",
       "",
-      "Choose exactly one decision and output structured JSON only.",
+      "Previous decisions and iteration context:",
+      "{controllerJson}",
+      "",
+      "Output strict JSON only.",
     ].join("\n"),
   ],
 ]);
@@ -140,10 +159,14 @@ type HistoricalSignals = {
 };
 
 type PipelineDecisionContext = {
+  topic: string | null;
+  scriptSummary: string | null;
   niche: string | null;
   durationSec: number | null;
   hookText: string | null;
   scriptWordCount: number | null;
+  ctrScore: number | null;
+  retentionScore: number | null;
   predictionScore: number | null;
   predictedCtr: number | null;
   predictedRetention: number | null;
@@ -152,9 +175,21 @@ type PipelineDecisionContext = {
   thumbnailQuality: string | null;
 };
 
-type CostDecisionContext = {
+type BaseCostDecisionContext = {
   pipeline: PipelineDecisionContext;
   history: HistoricalSignals;
+};
+
+type CostDecisionContext = BaseCostDecisionContext & {
+  iterationCount: number;
+  maxIterations: number;
+  previousDecisions: CostDecision[];
+};
+
+type ControllerIterationState = {
+  baseFingerprint: string;
+  iterationCount: number;
+  priorDecisions: CostDecision[];
 };
 
 type CostAnalysisMetrics = {
@@ -191,6 +226,7 @@ const costAnalysisCache = new Map<
   { value: CostAnalysisResult; expiresAt: number }
 >();
 const inFlightCostAnalysis = new Map<string, Promise<CostAnalysisResult>>();
+const controllerStateByRunId = new Map<string, ControllerIterationState>();
 
 export type CostBreakdown = {
   voiceUsd: number;
@@ -421,6 +457,47 @@ function compactText(text: string, maxLen = 96): string {
   return `${normalized.slice(0, maxLen - 3)}...`;
 }
 
+function normalizeScore(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
+function summarizeScript(
+  body: string | null | undefined,
+  cta: string | null | undefined,
+): string | null {
+  const scriptBody = (body ?? "").trim();
+  const scriptCta = (cta ?? "").trim();
+  if (!scriptBody && !scriptCta) return null;
+  if (!scriptBody) return compactText(scriptCta, 180);
+  const merged = scriptCta ? `${scriptBody} ${scriptCta}` : scriptBody;
+  return compactText(merged, 220);
+}
+
+function dedupeDecisions(decisions: CostDecision[]): CostDecision[] {
+  const unique: CostDecision[] = [];
+  for (const decision of decisions) {
+    if (!unique.includes(decision)) unique.push(decision);
+  }
+  if (unique.length > 1) {
+    return unique.filter((decision) => decision !== "APPROVE_PIPELINE");
+  }
+  return unique;
+}
+
+function learningPattern(context: CostDecisionContext): string | undefined {
+  if (context.history.topSuccessfulHooks.length > 0) {
+    return `Successful hook pattern: ${context.history.topSuccessfulHooks[0]}`;
+  }
+  if (context.history.lowRoiHooks.length > 0) {
+    return `Low ROI pattern to avoid: ${context.history.lowRoiHooks[0]}`;
+  }
+  if (context.history.nicheSaturation) {
+    return "Niche is showing weak recent ROI; fresh topic angles perform better.";
+  }
+  return undefined;
+}
+
 function targetWordBudget(durationSec: number | null): number {
   if (durationSec == null || durationSec <= 0) return 170;
   return Math.max(45, Math.round(durationSec * 2.8));
@@ -457,16 +534,25 @@ function buildHeuristicDecision(
   context: CostDecisionContext,
 ): CostAnalysis {
   const mainCostDriver = pickMainCostDriver(cost);
-  const predictionScore = context.pipeline.predictionScore ?? 5;
-  const predictedCtr =
-    context.pipeline.predictedCtr ?? context.history.avgCtr ?? 4;
-  const predictedRetention =
-    context.pipeline.predictedRetention ?? context.history.avgRetention ?? 50;
+  const ctrScore =
+    context.pipeline.ctrScore ??
+    normalizeScore((context.history.avgCtr ?? 4) / 10);
+  const retentionScore =
+    context.pipeline.retentionScore ??
+    normalizeScore((context.history.avgRetention ?? 50) / 100);
+  const performanceConfidence =
+    context.pipeline.predictionScore != null
+      ? (normalizeScore(context.pipeline.predictionScore / 10) ?? 0.5)
+      : (normalizeScore(
+          (ctrScore ?? 0.4) * 0.55 + (retentionScore ?? 0.5) * 0.45,
+        ) ?? 0.5);
   const wordCount = context.pipeline.scriptWordCount ?? 0;
   const wordBudget = targetWordBudget(context.pipeline.durationSec);
+  const longScript = wordCount > wordBudget;
+  const prior = new Set(context.previousDecisions);
 
-  const lowCtr = predictedCtr < 3.5 || predictionScore < 4.8;
-  const lowRetention = predictedRetention < 42;
+  const lowCtr = (ctrScore ?? 0.4) < 0.4;
+  const lowRetention = (retentionScore ?? 0.5) < 0.45;
   const highCost = cost.totalUsd >= 0.12;
   const expensiveVoiceTier =
     (context.pipeline.voiceTier === "premium" ||
@@ -474,90 +560,144 @@ function buildHeuristicDecision(
     cost.voiceUsd >= 0.02;
   const expensiveThumbnail =
     context.pipeline.thumbnailEnabled && cost.thumbnailUsd >= 0.04;
+  const maxIterationsReached = context.iterationCount > context.maxIterations;
+
+  const decisions: CostDecision[] = [];
 
   if (context.history.nicheSaturation && (lowCtr || lowRetention)) {
-    return {
-      decision: "CHANGE_TOPIC",
-      reasoning:
-        "Recent runs in this niche show weak ROI and this run's expected performance is also low, so shifting to a fresher angle is the most efficient move.",
-      cost_optimization: {
-        main_cost_driver: mainCostDriver,
-        suggestion:
-          "Change to a less saturated topic before spending more on premium voice, thumbnails, or retries.",
-      },
-      performance_expectation: { ctr: "increase", retention: "increase" },
-    };
+    decisions.push("CHANGE_TOPIC");
   }
+
+  if (lowCtr) {
+    if (context.iterationCount <= 1 && !prior.has("REGENERATE_HOOK")) {
+      decisions.push("REGENERATE_HOOK");
+    } else if (!prior.has("MODIFY_SCRIPT")) {
+      decisions.push("MODIFY_SCRIPT");
+    } else {
+      decisions.push("CHANGE_TOPIC");
+    }
+  }
+
+  if (lowRetention) {
+    if (!prior.has("MODIFY_SCRIPT") || longScript) {
+      decisions.push("MODIFY_SCRIPT");
+    } else if (context.iterationCount > 1) {
+      decisions.push("CHANGE_TOPIC");
+    }
+  }
+
+  if (highCost && expensiveVoiceTier) {
+    decisions.push("CHANGE_VOICE_TIER");
+  }
+
+  if (highCost && expensiveThumbnail && performanceConfidence < 0.62) {
+    decisions.push("SKIP_THUMBNAIL");
+  }
+
+  let normalizedDecisions = dedupeDecisions(decisions);
 
   if (
-    lowCtr &&
-    (highCost ||
-      context.history.weakPatternCount > context.history.strongPatternCount)
+    maxIterationsReached &&
+    !normalizedDecisions.includes("APPROVE_PIPELINE")
   ) {
-    return {
-      decision: "REGENERATE_HOOK",
-      reasoning:
-        "Expected CTR is below target while spend is non-trivial, so improving the opening hook gives the best chance to lift ROI before further costs.",
-      cost_optimization: {
-        main_cost_driver: mainCostDriver,
-        suggestion:
-          "Generate 3-5 stronger curiosity-gap hooks and keep the first 2-3 seconds specific and high-stakes.",
-      },
-      performance_expectation: { ctr: "increase", retention: "neutral" },
-    };
+    normalizedDecisions = ["CHANGE_TOPIC"];
   }
 
-  if (lowRetention && (wordCount > wordBudget || highCost)) {
-    return {
-      decision: "MODIFY_SCRIPT",
-      reasoning:
-        "Predicted retention is weak for the current script density, so tightening structure should improve hold rate and reduce unnecessary voice spend.",
-      cost_optimization: {
-        main_cost_driver: mainCostDriver,
-        suggestion:
-          "Shorten and simplify the script, move payoff earlier, and remove low-value filler lines.",
-      },
-      performance_expectation: { ctr: "neutral", retention: "increase" },
-    };
+  if (normalizedDecisions.includes("CHANGE_TOPIC")) {
+    normalizedDecisions = ["CHANGE_TOPIC"];
   }
 
-  if (expensiveVoiceTier && predictionScore < 7.2) {
-    return {
-      decision: "CHANGE_VOICE_TIER",
-      reasoning:
-        "The selected voice tier is expensive relative to expected performance, so downgrading tier preserves budget with limited downside.",
-      cost_optimization: {
-        main_cost_driver: "voice",
-        suggestion:
-          "Downgrade to economy for this run and reserve premium or elite only for higher-confidence predictions.",
-      },
-      performance_expectation: { ctr: "neutral", retention: "neutral" },
-    };
+  if (normalizedDecisions.length === 0) {
+    normalizedDecisions = ["APPROVE_PIPELINE"];
   }
 
-  if (expensiveThumbnail && predictionScore < 5.2) {
-    return {
-      decision: "SKIP_THUMBNAIL",
-      reasoning:
-        "Thumbnail spend is high for a low-confidence run, so skipping it improves cost efficiency without major retention impact.",
-      cost_optimization: {
-        main_cost_driver: "thumbnail",
-        suggestion:
-          "Skip thumbnail generation for this run and apply thumbnails only to strong predicted performers.",
-      },
-      performance_expectation: { ctr: "neutral", retention: "neutral" },
-    };
+  const repeatingSamePlan =
+    context.iterationCount > 1 &&
+    normalizedDecisions.length > 0 &&
+    normalizedDecisions.every((decision) => prior.has(decision));
+
+  let ctrExpectation: PerformanceDirection = "neutral";
+  let retentionExpectation: PerformanceDirection = "neutral";
+  if (
+    normalizedDecisions.includes("REGENERATE_HOOK") ||
+    normalizedDecisions.includes("CHANGE_TOPIC")
+  ) {
+    ctrExpectation = "increase";
   }
+  if (
+    normalizedDecisions.includes("MODIFY_SCRIPT") ||
+    normalizedDecisions.includes("CHANGE_TOPIC")
+  ) {
+    retentionExpectation = "increase";
+  }
+
+  let confidence = 0.58;
+  const signalCount = [
+    lowCtr,
+    lowRetention,
+    highCost,
+    expensiveVoiceTier,
+    expensiveThumbnail,
+    context.history.nicheSaturation,
+  ].filter(Boolean).length;
+  confidence += signalCount * 0.06;
+  if (context.iterationCount > 1) confidence += 0.05;
+  if (normalizedDecisions[0] === "APPROVE_PIPELINE") {
+    confidence = 0.62 + (performanceConfidence >= 0.68 ? 0.12 : 0);
+  }
+  if (repeatingSamePlan) confidence = Math.max(confidence, 0.74);
+  if (maxIterationsReached) confidence = Math.max(confidence, 0.82);
+  confidence = Math.max(0, Math.min(1, round4(confidence)));
+
+  const diminishingReturns =
+    repeatingSamePlan && !normalizedDecisions.includes("CHANGE_TOPIC");
+
+  const shouldContinue =
+    normalizedDecisions.includes("APPROVE_PIPELINE") ||
+    (!maxIterationsReached &&
+      !normalizedDecisions.includes("CHANGE_TOPIC") &&
+      !diminishingReturns);
+
+  const patternDetected = learningPattern(context);
+
+  const reasoningParts: string[] = [];
+  if (lowCtr) reasoningParts.push("predicted CTR is weak");
+  if (lowRetention) reasoningParts.push("predicted retention is weak");
+  if (highCost) reasoningParts.push("total cost is relatively high");
+  if (context.iterationCount > 1) {
+    reasoningParts.push(
+      `iteration ${context.iterationCount} requires escalation-aware control`,
+    );
+  }
+
+  const reasoning =
+    reasoningParts.length > 0
+      ? `Controller selected ${normalizedDecisions.join(", ")} because ${reasoningParts.join("; ")}.`
+      : "Controller selected APPROVE_PIPELINE because current cost and expected performance are balanced.";
 
   return {
-    decision: "APPROVE_PIPELINE",
-    reasoning:
-      "Current expected performance and spend are reasonably balanced, so the pipeline can proceed without extra regeneration cost.",
+    decisions: normalizedDecisions,
+    confidence,
+    reasoning,
     cost_optimization: {
       main_cost_driver: mainCostDriver,
       suggestion: defaultSuggestionForDriver(mainCostDriver),
     },
-    performance_expectation: { ctr: "neutral", retention: "neutral" },
+    performance_expectation: {
+      ctr: ctrExpectation,
+      retention: retentionExpectation,
+    },
+    iteration_control: {
+      should_continue: shouldContinue,
+      max_iterations_reached: maxIterationsReached,
+    },
+    learning_signal: {
+      pattern_detected: patternDetected ?? null,
+      should_store:
+        normalizedDecisions.includes("APPROVE_PIPELINE") ||
+        normalizedDecisions.includes("CHANGE_TOPIC") ||
+        !!patternDetected,
+    },
   };
 }
 
@@ -685,7 +825,13 @@ async function buildDecisionContext(params: {
   runProfile: {
     niche: string;
     targetDurationSec: number;
-    script: { hook: string; wordCount: number } | null;
+    topic: { title: string; angle: string } | null;
+    script: {
+      hook: string;
+      body: string;
+      cta: string;
+      wordCount: number;
+    } | null;
     prediction: {
       score: number;
       predictedCtr: number;
@@ -696,7 +842,7 @@ async function buildDecisionContext(params: {
   voiceProvider: string | null;
   thumbnailEnabled: boolean;
   thumbnailQuality: string | null;
-}): Promise<CostDecisionContext> {
+}): Promise<BaseCostDecisionContext> {
   const voiceInput = asRecord(params.voiceLog?.inputJson);
   const voiceTierFromInput = normalizeVoiceTier(asString(voiceInput?.tier));
   const voiceTier =
@@ -708,10 +854,25 @@ async function buildDecisionContext(params: {
 
   return {
     pipeline: {
+      topic: params.runProfile?.topic?.title ?? null,
+      scriptSummary: summarizeScript(
+        params.runProfile?.script?.body,
+        params.runProfile?.script?.cta,
+      ),
       niche: params.runProfile?.niche ?? null,
       durationSec: params.runProfile?.targetDurationSec ?? null,
       hookText: params.runProfile?.script?.hook ?? null,
       scriptWordCount: params.runProfile?.script?.wordCount ?? null,
+      ctrScore:
+        params.runProfile?.prediction?.predictedCtr == null
+          ? null
+          : normalizeScore(params.runProfile.prediction.predictedCtr / 10),
+      retentionScore:
+        params.runProfile?.prediction?.predictedRetention == null
+          ? null
+          : normalizeScore(
+              params.runProfile.prediction.predictedRetention / 100,
+            ),
       predictionScore: params.runProfile?.prediction?.score ?? null,
       predictedCtr: params.runProfile?.prediction?.predictedCtr ?? null,
       predictedRetention:
@@ -724,12 +885,16 @@ async function buildDecisionContext(params: {
   };
 }
 
-function contextFingerprint(context: CostDecisionContext): string {
+function baseContextFingerprint(context: BaseCostDecisionContext): string {
   return [
+    context.pipeline.topic ?? "",
+    context.pipeline.scriptSummary ?? "",
     context.pipeline.niche ?? "",
     context.pipeline.durationSec ?? "",
     context.pipeline.hookText ?? "",
     context.pipeline.scriptWordCount ?? "",
+    context.pipeline.ctrScore ?? "",
+    context.pipeline.retentionScore ?? "",
     context.pipeline.predictionScore ?? "",
     context.pipeline.predictedCtr ?? "",
     context.pipeline.predictedRetention ?? "",
@@ -746,6 +911,98 @@ function contextFingerprint(context: CostDecisionContext): string {
     context.history.topSuccessfulHooks.join("||"),
     context.history.lowRoiHooks.join("||"),
   ].join("|");
+}
+
+function contextFingerprint(context: CostDecisionContext): string {
+  return [
+    baseContextFingerprint(context),
+    context.iterationCount,
+    context.maxIterations,
+    context.previousDecisions.join("||"),
+  ].join("|");
+}
+
+function resolveIterationContext(params: {
+  runId: string;
+  forceReanalyze: boolean;
+  baseContext: BaseCostDecisionContext;
+}): { context: CostDecisionContext; baseFingerprint: string } {
+  const baseFingerprint = baseContextFingerprint(params.baseContext);
+  const existing = controllerStateByRunId.get(params.runId);
+
+  let iterationCount = 1;
+  let previousDecisions: CostDecision[] = [];
+
+  if (existing && existing.baseFingerprint === baseFingerprint) {
+    iterationCount = existing.iterationCount;
+    previousDecisions = [...existing.priorDecisions];
+    if (params.forceReanalyze) {
+      iterationCount = Math.min(
+        iterationCount + 1,
+        MAX_CONTROLLER_ITERATIONS + 1,
+      );
+    }
+  }
+
+  return {
+    baseFingerprint,
+    context: {
+      ...params.baseContext,
+      iterationCount,
+      maxIterations: MAX_CONTROLLER_ITERATIONS,
+      previousDecisions: previousDecisions.slice(-8),
+    },
+  };
+}
+
+function persistIterationState(params: {
+  runId: string;
+  baseFingerprint: string;
+  iterationCount: number;
+  decisions: CostDecision[];
+}): void {
+  const previous = controllerStateByRunId.get(params.runId);
+  const sameBase = previous?.baseFingerprint === params.baseFingerprint;
+  const prior = sameBase ? (previous?.priorDecisions ?? []) : [];
+  const merged = [...prior, ...params.decisions].slice(-12);
+  controllerStateByRunId.set(params.runId, {
+    baseFingerprint: params.baseFingerprint,
+    iterationCount: params.iterationCount,
+    priorDecisions: merged,
+  });
+}
+
+function normalizeAnalysisOutput(analysis: CostAnalysis): CostAnalysis {
+  const decisions = dedupeDecisions(analysis.decisions);
+  const safeDecisions: CostDecision[] =
+    decisions.length > 0 ? decisions : ["APPROVE_PIPELINE"];
+  const confidence = Math.max(0, Math.min(1, analysis.confidence));
+  const normalizedShouldContinue =
+    safeDecisions.includes("APPROVE_PIPELINE") ||
+    (!analysis.iteration_control.max_iterations_reached &&
+      !safeDecisions.includes("CHANGE_TOPIC"));
+
+  const rawPattern = analysis.learning_signal.pattern_detected;
+  const normalizedPattern =
+    rawPattern == null
+      ? null
+      : rawPattern.trim().length >= 8
+        ? rawPattern.trim()
+        : null;
+
+  return {
+    ...analysis,
+    decisions: safeDecisions,
+    confidence: round4(confidence),
+    iteration_control: {
+      ...analysis.iteration_control,
+      should_continue: normalizedShouldContinue,
+    },
+    learning_signal: {
+      ...analysis.learning_signal,
+      pattern_detected: normalizedPattern,
+    },
+  };
 }
 
 function pruneExpiredAnalysisCache(now = Date.now()): number {
@@ -801,10 +1058,17 @@ function getCachedAnalysis(key: string): CostAnalysisResult | null {
 async function analyzeCostWithLangChain(
   runId: string,
   cost: CostSnapshot,
-  context: CostDecisionContext,
+  baseContext: BaseCostDecisionContext,
   options?: EstimateRunCostOptions,
 ): Promise<CostAnalysisResult> {
   costAnalysisMetrics.requests += 1;
+
+  const resolved = resolveIterationContext({
+    runId,
+    forceReanalyze: !!options?.forceReanalyze,
+    baseContext,
+  });
+  const context = resolved.context;
 
   const cacheKey = buildAnalysisCacheKey(runId, cost, context);
   pruneExpiredAnalysisCache();
@@ -827,7 +1091,9 @@ async function analyzeCostWithLangChain(
   const task = (async (): Promise<CostAnalysisResult> => {
     try {
       const heuristic = (): CostAnalysisResult => ({
-        analysis: buildHeuristicDecision(cost, context),
+        analysis: normalizeAnalysisOutput(
+          buildHeuristicDecision(cost, context),
+        ),
         model: "heuristic",
       });
 
@@ -856,25 +1122,57 @@ async function analyzeCostWithLangChain(
 
         const analysis = await chain.invoke({
           runId,
-          pipelineJson: JSON.stringify(context.pipeline),
+          pipelineJson: JSON.stringify({
+            topic: context.pipeline.topic,
+            script_summary: context.pipeline.scriptSummary,
+            hook: context.pipeline.hookText,
+            prediction: {
+              ctr_score: context.pipeline.ctrScore,
+              retention_score: context.pipeline.retentionScore,
+            },
+            duration_sec: context.pipeline.durationSec,
+            voice_tier: context.pipeline.voiceTier,
+            thumbnail_enabled: context.pipeline.thumbnailEnabled,
+          }),
           costJson: JSON.stringify({
-            llmCostUsd: round4(cost.llmUsd),
-            voiceCostUsd: round4(cost.voiceUsd),
-            videoCostUsd: round4(cost.whisperUsd),
-            thumbnailCostUsd: round4(cost.thumbnailUsd),
-            totalCostUsd: round4(cost.totalUsd),
+            llm_cost: round4(cost.llmUsd),
+            voice_cost: round4(cost.voiceUsd),
+            video_cost: round4(cost.whisperUsd),
+            thumbnail_cost: round4(cost.thumbnailUsd),
+            total_cost: round4(cost.totalUsd),
             source: cost.source,
           }),
-          historyJson: JSON.stringify(context.history),
+          historyJson: JSON.stringify({
+            top_performing_hooks: context.history.topSuccessfulHooks,
+            low_roi_hooks: context.history.lowRoiHooks,
+            avg_ctr: context.history.avgCtr,
+            avg_retention: context.history.avgRetention,
+            avg_performance: context.history.avgPerformance,
+            strong_pattern_count: context.history.strongPatternCount,
+            weak_pattern_count: context.history.weakPatternCount,
+            niche_saturation: context.history.nicheSaturation,
+            sample_size: context.history.sampleSize,
+          }),
+          controllerJson: JSON.stringify({
+            iteration_count: context.iterationCount,
+            max_iterations: context.maxIterations,
+            previous_decisions: context.previousDecisions,
+          }),
         });
 
         result = {
-          analysis,
+          analysis: normalizeAnalysisOutput(analysis),
           model: env.OPENAI_MODEL_COST_ANALYSIS,
         };
         costAnalysisCache.set(cacheKey, {
           value: result,
           expiresAt: Date.now() + COST_ANALYSIS_CACHE_TTL_MS,
+        });
+        persistIterationState({
+          runId,
+          baseFingerprint: resolved.baseFingerprint,
+          iterationCount: context.iterationCount,
+          decisions: result.analysis.decisions,
         });
         costAnalysisMetrics.generated += 1;
         return result;
@@ -884,11 +1182,19 @@ async function analyzeCostWithLangChain(
         value: result,
         expiresAt: Date.now() + COST_ANALYSIS_CACHE_TTL_MS,
       });
+      persistIterationState({
+        runId,
+        baseFingerprint: resolved.baseFingerprint,
+        iterationCount: context.iterationCount,
+        decisions: result.analysis.decisions,
+      });
       return result;
     } catch (err) {
       costAnalysisMetrics.failed += 1;
       const fallback: CostAnalysisResult = {
-        analysis: buildHeuristicDecision(cost, context),
+        analysis: normalizeAnalysisOutput(
+          buildHeuristicDecision(cost, context),
+        ),
         model: "heuristic",
       };
       log.warn(
@@ -898,6 +1204,12 @@ async function analyzeCostWithLangChain(
       costAnalysisCache.set(cacheKey, {
         value: fallback,
         expiresAt: Date.now() + COST_ANALYSIS_CACHE_TTL_MS,
+      });
+      persistIterationState({
+        runId,
+        baseFingerprint: resolved.baseFingerprint,
+        iterationCount: context.iterationCount,
+        decisions: fallback.analysis.decisions,
       });
       return fallback;
     } finally {
@@ -932,9 +1244,17 @@ export async function estimateRunCost(
       select: {
         niche: true,
         targetDurationSec: true,
+        topic: {
+          select: {
+            title: true,
+            angle: true,
+          },
+        },
         script: {
           select: {
             hook: true,
+            body: true,
+            cta: true,
             wordCount: true,
           },
         },

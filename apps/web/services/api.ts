@@ -234,13 +234,15 @@ export type PipelineRun = {
 };
 
 export type CostAnalysis = {
-  decision:
+  decisions: Array<
     | "APPROVE_PIPELINE"
     | "REGENERATE_HOOK"
     | "MODIFY_SCRIPT"
     | "CHANGE_VOICE_TIER"
     | "SKIP_THUMBNAIL"
-    | "CHANGE_TOPIC";
+    | "CHANGE_TOPIC"
+  >;
+  confidence: number;
   reasoning: string;
   cost_optimization: {
     main_cost_driver: "voice" | "llm" | "thumbnail" | "video";
@@ -249,6 +251,14 @@ export type CostAnalysis = {
   performance_expectation: {
     ctr: "increase" | "decrease" | "neutral";
     retention: "increase" | "decrease" | "neutral";
+  };
+  iteration_control: {
+    should_continue: boolean;
+    max_iterations_reached: boolean;
+  };
+  learning_signal: {
+    pattern_detected: string | null;
+    should_store: boolean;
   };
 };
 
