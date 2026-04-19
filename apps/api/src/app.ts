@@ -15,6 +15,20 @@ export function createApp() {
   app.use(
     pinoHttp({
       logger,
+      serializers: {
+        req: (req) => ({
+          id: req.id,
+          method: req.method,
+          url: req.url,
+          query: req.query,
+          params: req.params,
+          remoteAddress: req.remoteAddress,
+          remotePort: req.remotePort,
+        }),
+        res: (res) => ({
+          statusCode: res.statusCode,
+        }),
+      },
       customLogLevel: (_req, res, err) => {
         if (err || res.statusCode >= 500) return "error";
         if (res.statusCode >= 400) return "warn";
