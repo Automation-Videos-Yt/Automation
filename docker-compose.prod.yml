@@ -1,0 +1,165 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-youtube_automation}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-youtube_automation}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  api:
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-youtube_automation}?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      API_PORT: 4000
+    volumes:
+      - storage_data:/storage
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "npx prisma migrate deploy && npx tsx src/index.ts"
+
+  worker:
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-youtube_automation}?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: all
+    volumes:
+      - storage_data:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  # Optional split workers. Start them with:
+  # docker compose -f docker-compose.prod.yml --profile split-workers up -d worker-video worker-upload worker-enrichment
+  # (and stop the default `worker` service when using split mode)
+  worker-video:
+    profiles: ["split-workers"]
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-youtube_automation}?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: video
+      ENABLE_ANALYTICS_CRON: "false"
+    volumes:
+      - storage_data:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  worker-upload:
+    profiles: ["split-workers"]
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-youtube_automation}?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: upload
+      ENABLE_ANALYTICS_CRON: "false"
+    volumes:
+      - storage_data:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  worker-enrichment:
+    profiles: ["split-workers"]
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-youtube_automation}?schema=public
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+      STORAGE_PATH: /storage
+      WORKER_ROLE: enrichment
+      ENABLE_ANALYTICS_CRON: "true"
+    volumes:
+      - storage_data:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      ai:
+        condition: service_started
+
+  ai:
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-ai:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STORAGE_PATH: /storage
+    volumes:
+      - storage_data:/storage
+
+  web:
+    image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  storage_data:
