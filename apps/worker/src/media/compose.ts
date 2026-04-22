@@ -33,9 +33,11 @@ async function runFfmpeg(args: string[], phase: string): Promise<void> {
       } else {
         log.error(
           { phase, elapsedMs, code, tail: stderr.slice(-800) },
-          "ffmpeg non-zero"
+          "ffmpeg non-zero",
         );
-        reject(new Error(`ffmpeg ${phase} exited ${code}: ${stderr.slice(-800)}`));
+        reject(
+          new Error(`ffmpeg ${phase} exited ${code}: ${stderr.slice(-800)}`),
+        );
       }
     });
   });
@@ -61,7 +63,7 @@ export async function composeFinalVideo(opts: ComposeOptions): Promise<void> {
   const rlog = opts.runId ? log.child({ runId: opts.runId }) : log;
   rlog.info(
     { scenes: opts.sceneClipPaths.length, out: opts.outputPath },
-    "compose start"
+    "compose start",
   );
 
   // --- Step 1: concat ---
@@ -85,14 +87,14 @@ export async function composeFinalVideo(opts: ComposeOptions): Promise<void> {
       "copy",
       concatOut,
     ],
-    "concat"
+    "concat",
   );
 
   // --- Step 2: mux audio + subtitles ---
   const hasSubs = opts.subtitlePath && opts.subtitlePath.length > 0;
-  // Portrait tuning: small white text with thick black outline, anchored near the bottom.
+  // Portrait tuning: bold boxed captions for stronger on-screen presence.
   const vf = hasSubs
-    ? `subtitles='${escapeForFilter(opts.subtitlePath)}':force_style='Fontname=DejaVu Sans,Fontsize=13,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=60'`
+    ? `subtitles='${escapeForFilter(opts.subtitlePath)}':force_style='Fontname=DejaVu Sans,Fontsize=17,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BackColour=&H78000000,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=74,Spacing=0.6'`
     : null;
 
   const muxArgs = [

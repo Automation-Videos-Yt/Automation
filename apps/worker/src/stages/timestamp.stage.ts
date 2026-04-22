@@ -67,8 +67,11 @@ export const timestampStage: PipelineStage = {
     const voice = await getVoice(context);
     const narration = await getNarration(context);
 
-    if (!context.cache.features.enableTimestamp || !isEnglishLanguage(run.languageCode)) {
-      const targetSceneSec = run.targetDurationSec < 30 ? 4 : 7.5;
+    if (
+      !context.cache.features.enableTimestamp ||
+      !isEnglishLanguage(run.languageCode)
+    ) {
+      const targetSceneSec = 3;
       const fallback: TimestampOutput = {
         total_duration_sec: voice.duration_sec,
         words: [],
@@ -82,7 +85,9 @@ export const timestampStage: PipelineStage = {
       context.cache.timestamp = fallback;
       await completeStage(context, STAGE, AGENT, {
         fallback: true,
-        reason: !context.cache.features.enableTimestamp ? "feature-disabled" : "non-english",
+        reason: !context.cache.features.enableTimestamp
+          ? "feature-disabled"
+          : "non-english",
       });
       return { success: true, data: fallback };
     }
@@ -94,7 +99,7 @@ export const timestampStage: PipelineStage = {
       return { success: true, data: cached };
     }
 
-    const targetSceneSec = run.targetDurationSec < 30 ? 4 : 7.5;
+    const targetSceneSec = 3;
     const timestampInput = {
       audio_path: voice.audio_path,
       script_text: narration,
@@ -102,10 +107,19 @@ export const timestampStage: PipelineStage = {
       language_code: run.languageCode,
     };
 
-    const timestamp = await withAgentLog(context.prisma, context.runId, AGENT, timestampInput, () =>
-      runAgent<typeof timestampInput, TimestampOutput>(AGENT, timestampInput, {
-        runId: context.runId,
-      }),
+    const timestamp = await withAgentLog(
+      context.prisma,
+      context.runId,
+      AGENT,
+      timestampInput,
+      () =>
+        runAgent<typeof timestampInput, TimestampOutput>(
+          AGENT,
+          timestampInput,
+          {
+            runId: context.runId,
+          },
+        ),
     );
 
     context.cache.timestamp = timestamp;
