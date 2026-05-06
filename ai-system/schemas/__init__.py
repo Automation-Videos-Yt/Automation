@@ -1,5 +1,5 @@
 from .topic_schema import TopicInput, TopicOutput
-from .script_schema import ScriptInput, ScriptOutput
+from .script_schema import ScriptInput, ScriptOutput, PastTopicContext as ScriptPastTopicContext
 from .voice_schema import VoiceInput, VoiceOutput
 from .video_schema import VideoMetaInput, VideoMetaOutput
 from .hook_schema import HookInput, HookOutput, HookVariant
@@ -35,6 +35,7 @@ __all__ = [
     "TopicOutput",
     "ScriptInput",
     "ScriptOutput",
+    "ScriptPastTopicContext",
     "VoiceInput",
     "VoiceOutput",
     "VideoMetaInput",

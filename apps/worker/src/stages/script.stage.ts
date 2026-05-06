@@ -3,6 +3,7 @@ import { loadScript } from "../cache/cache-resume";
 import {
   completeStage,
   createStageErrorHandler,
+  getPastTopics,
   getRun,
   getTopic,
   startStage,
@@ -27,17 +28,24 @@ export const scriptStage: PipelineStage = {
 
     const run = await getRun(context);
     const topic = await getTopic(context);
+    const pastTopics = await getPastTopics(context);
     const scriptInput = {
       topic_title: topic.title,
       topic_angle: topic.angle,
       target_duration_sec: run.targetDurationSec,
       language_code: run.languageCode,
+      past_topics: pastTopics,
     };
 
-    const script = await withAgentLog(context.prisma, context.runId, AGENT, scriptInput, () =>
-      runAgent<typeof scriptInput, ScriptOutput>(AGENT, scriptInput, {
-        runId: context.runId,
-      }),
+    const script = await withAgentLog(
+      context.prisma,
+      context.runId,
+      AGENT,
+      scriptInput,
+      () =>
+        runAgent<typeof scriptInput, ScriptOutput>(AGENT, scriptInput, {
+          runId: context.runId,
+        }),
     );
 
     await context.prisma.script.create({

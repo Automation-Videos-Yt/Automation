@@ -38,6 +38,11 @@ Emotion + stakes (required):
 - Use 2nd-person language ("you", "your") and conversational delivery.
 - Add at least one "pain → payoff" turn in the BODY (a quick before/after contrast).
 
+Memory-based learning (if past topics with performance tags are provided):
+- Lean TOWARD structural patterns that were tagged "strong".
+- Lean AWAY from patterns tagged "weak".
+- Do NOT copy past titles/angles verbatim.
+
 Return only the JSON object the schema requests."""
 
 
@@ -76,12 +81,29 @@ def run(raw_input: dict) -> dict:
         "topic=%r duration_target=%ds", payload.topic_title, payload.target_duration_sec
     )
 
+    past_block = ""
+    if payload.past_topics:
+        lines = ["\nPast topics from this niche (use as signal, don't copy):"]
+        for p in payload.past_topics:
+            parts = [f'- "{p.topic_title}" — {p.topic_angle}']
+            if p.performance_tag:
+                parts.append(f"tag={p.performance_tag}")
+            if p.views is not None:
+                parts.append(f"views={p.views}")
+            if p.ctr is not None:
+                parts.append(f"ctr={p.ctr:.1f}%")
+            if p.avg_view_pct is not None:
+                parts.append(f"avp={p.avg_view_pct:.1f}%")
+            lines.append(" | ".join(parts))
+        past_block = "\n" + "\n".join(lines)
+
     user_msg = (
         f"Topic title: {payload.topic_title}\n"
         f"Topic angle: {payload.topic_angle}\n"
         f"Target language code: {payload.language_code}\n"
         f"Target duration: {payload.target_duration_sec} seconds\n"
         f"Target word count: approximately {int(payload.target_duration_sec * WORDS_PER_SECOND)} words"
+        f"{past_block}"
     )
 
     with timed(log, "openai.chat.completions", model=settings.openai_model_quality):
