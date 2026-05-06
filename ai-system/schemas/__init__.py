@@ -23,6 +23,12 @@ from .retention_optimizer_schema import (
     RetentionOptimizerInput,
     RetentionOptimizerOutput,
 )
+from .editor_notes_schema import (
+    EditorNotesInput,
+    EditorNotesOutput,
+    EditorNotesSceneInput,
+    EditorNotesSceneOutput,
+)
 
 __all__ = [
     "TopicInput",
@@ -58,4 +64,8 @@ __all__ = [
     "TopPerformingHook",
     "RetentionOptimizerInput",
     "RetentionOptimizerOutput",
+    "EditorNotesInput",
+    "EditorNotesOutput",
+    "EditorNotesSceneInput",
+    "EditorNotesSceneOutput",
 ]

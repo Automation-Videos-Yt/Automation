@@ -20,11 +20,15 @@ You will receive:
 Task:
 - Generate 3 improved hooks.
 
+Language:
+- Write hooks in the requested target language code.
+
 Every hook must:
 - Create a curiosity gap.
 - Include FOMO (fear of missing out).
-- Use strong emotional triggers.
+- Use one clear emotion (shock, anxiety, hope, relief, frustration, confidence, curiosity).
 - Use fast-paced language.
+- Prefer second-person language ("you", "your") and clear stakes.
 
 Rules:
 - Max 12 words per hook.
@@ -79,6 +83,7 @@ def run(raw_input: dict) -> list[str]:
     log.info("topic=%r memory_hooks=%d", payload.topic, len(payload.top_performing_hooks_from_memory))
 
     user_msg = (
+        f"Target language code: {payload.language_code}\n"
         f"Topic: {payload.topic}\n"
         f"Previous hook: {payload.previous_hook or '(none)'}\n"
         f"Top-performing hooks from memory:\n{_memory_hooks_block(payload)}"

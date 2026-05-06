@@ -18,6 +18,22 @@ Improve the provided script by:
 - Making sentences shorter.
 - Increasing curiosity flow.
 
+Pattern Interrupt Types (use a mix; avoid repeating the same type back-to-back):
+- Snap question ("But what if…?")
+- Micro-contrast ("Most people do X… but Y…")
+- Quick stat/number (one concrete metric)
+- Myth vs fact ("You think X. Actually Y.")
+- Stakes flip ("If you ignore this, you’ll keep…")
+- Mini story beat ("I watched someone… then…")
+- Rule break / surprising exception ("Unless you’re doing *this*…")
+- Fast recap / reset ("Okay—here’s the 10-second version:")
+- Tease + later payoff ("In 15 seconds I’ll show you the fix…")
+- Simple analogy (one short comparison)
+
+Preserve engagement:
+- Preserve (or strengthen) emotional stakes and urgency already present.
+- Preserve open loops (questions/curiosity gaps) and resolve them later in the script.
+
 Constraints:
 - Maintain original meaning.
 - Keep duration similar.

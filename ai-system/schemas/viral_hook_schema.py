@@ -13,6 +13,7 @@ class TopPerformingHook(BaseModel):
 class ViralHookInput(BaseModel):
     topic: str = Field(..., min_length=2)
     previous_hook: str = ""
+    language_code: str = Field(default="en", min_length=2, max_length=10)
     top_performing_hooks_from_memory: list[str | TopPerformingHook] = Field(
         default_factory=list
     )
