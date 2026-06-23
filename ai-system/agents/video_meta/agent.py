@@ -78,28 +78,30 @@ def run(raw_input: dict) -> dict:
         f"Real YouTube autocomplete phrases (high search intent):\n{autocomplete_block}"
     )
 
-    with timed(log, "openai.chat.completions", model=settings.openai_model_fast):
-        response = client.chat.completions.create(
-            model=settings.openai_model_fast,
-            temperature=0.7,
-            response_format=RESPONSE_FORMAT,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-        )
+    from lib.llm import chat
+    from lib.model_router import TaskType
 
-    usage = getattr(response, "usage", None)
-    if usage:
-        log.info(
-            "tokens in=%s out=%s total=%s",
-            usage.prompt_tokens,
-            usage.completion_tokens,
-            usage.total_tokens,
-        )
+    with timed(log, "llm.video_meta", task="VIDEO_META"):
+        try:
+            resp = chat(
+                task_type=TaskType.VIDEO_META,
+                temperature=0.7,
+                response_format=RESPONSE_FORMAT,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            content = resp.choices[0].message.content or "{}"
+            data = json.loads(content)
+        except Exception as e:
+            log.warning("video_meta generation failed across all providers: %s. Using dumb fallback.", e)
+            data = {
+                "title": payload.title,
+                "description": f"{payload.title}\n\n{payload.script_body[:200]}...\n\n#shorts",
+                "tags": [t for t in autocomplete[:10]] if autocomplete else [payload.title.split()[0].lower()]
+            }
 
-    content = response.choices[0].message.content or "{}"
-    data = json.loads(content)
     out = VideoMetaOutput.model_validate(data).model_dump()
     log.info(
         "seo title=%r tags=%d desc_len=%d",
