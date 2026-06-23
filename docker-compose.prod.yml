@@ -170,14 +170,19 @@ services:
     depends_on:
       - api
 
-  nginx:
-    image: nginx:alpine
+  caddy:
+    image: caddy:2-alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
+    environment:
+      - DOMAIN=${DOMAIN:-13.207.169.204.nip.io}
     volumes:
-      - ./infrastructure/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       - web
       - api
@@ -202,3 +207,5 @@ services:
 volumes:
   pgdata:
   storage_data:
+  caddy_data:
+  caddy_config:

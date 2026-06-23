@@ -1,0 +1,11 @@
+{$DOMAIN} {
+    # Route /api/* requests to the backend API, stripping the /api prefix
+    handle_path /api/* {
+        reverse_proxy api:4000
+    }
+
+    # Everything else goes to the Next.js Frontend
+    handle {
+        reverse_proxy web:3000
+    }
+}
