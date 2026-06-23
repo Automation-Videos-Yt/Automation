@@ -1,4 +1,7 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const isServer = typeof window === "undefined";
+const API_URL = isServer
+  ? (process.env.API_URL ?? "http://api:4000")
+  : "/api";
 
 export type RunStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
 export type PipelineStage =
