@@ -109,13 +109,29 @@ jobs:
   # GHCR Docker Build & Push
   # ──────────────────────────────────────────────────────────────────────────
   build-push-ghcr:
-    name: Docker Build & Push (GHCR)
+    name: Docker Build & Push (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [node, prisma-schema, python]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: infrastructure/docker/Dockerfile.api
+            repository: automation-api
+          - service: web
+            dockerfile: infrastructure/docker/Dockerfile.web
+            repository: automation-web
+          - service: worker
+            dockerfile: infrastructure/docker/Dockerfile.worker
+            repository: automation-worker
+          - service: ai
+            dockerfile: infrastructure/docker/Dockerfile.ai
+            repository: automation-ai
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -133,45 +149,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push api image
+      - name: Build and push ${{ matrix.service }} image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: infrastructure/docker/Dockerfile.api
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER_LC }}/automation-api:latest
-            ghcr.io/${{ env.OWNER_LC }}/automation-api:${{ github.sha }}
-
-      - name: Build and push web image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infrastructure/docker/Dockerfile.web
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/automation-web:latest
-            ghcr.io/${{ env.OWNER_LC }}/automation-web:${{ github.sha }}
-
-      - name: Build and push worker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infrastructure/docker/Dockerfile.worker
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/automation-worker:latest
-            ghcr.io/${{ env.OWNER_LC }}/automation-worker:${{ github.sha }}
-
-      - name: Build and push ai image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infrastructure/docker/Dockerfile.ai
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/automation-ai:latest
-            ghcr.io/${{ env.OWNER_LC }}/automation-ai:${{ github.sha }}
+            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.repository }}:latest
+            ghcr.io/${{ env.OWNER_LC }}/${{ matrix.repository }}:${{ github.sha }}
 
   # ──────────────────────────────────────────────────────────────────────────
   # Aggregated status check
