@@ -44,7 +44,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: sh -c "npx prisma migrate deploy && npx tsx src/index.ts"
+    command: sh -c "npm run prisma:deploy && npm start"
 
   worker:
     image: ${DOCKERHUB_NAMESPACE:-hardik18hk19}/automation-worker:${IMAGE_TAG:-latest}
