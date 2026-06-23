@@ -93,6 +93,7 @@ def run(raw_input: dict) -> dict:
                 try:
                     from openai import OpenAI
                     from config import settings
+                    f.seek(0)  # Rewind the file stream for the second attempt!
                     groq_client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
                     req["model"] = "whisper-large-v3-turbo"
                     # Some OpenAI-compatible endpoints fail if timestamp_granularities is present
@@ -103,8 +104,8 @@ def run(raw_input: dict) -> dict:
                     resp = None
 
     # The SDK returns a Pydantic-ish object; normalize.
-    words_raw = getattr(resp, "words", None) if resp else []
-    total_duration = float(getattr(resp, "duration", 0.0)) if resp else 0.0
+    words_raw = getattr(resp, "words", None) or [] if resp else []
+    total_duration = float(getattr(resp, "duration", 0.0) or 0.0) if resp else 0.0
 
     words: list[WordSpan] = []
     for w in words_raw:
