@@ -55,27 +55,38 @@ class GeminiProvider(BaseProvider):
         if not response_format:
             return None
         # Convert standard JSON schema to Gemini Schema
-        schema = response_format.get("json_schema", {}).get("schema", {})
-        if not schema:
+        schema_dict = response_format.get("json_schema", {}).get("schema", {})
+        if not schema_dict:
             return None
         
-        import copy
-        def clean_schema(d):
-            if isinstance(d, dict):
-                d.pop("additionalProperties", None)
-                d.pop("strict", None)
-                for k, v in d.items():
-                    clean_schema(v)
-            elif isinstance(d, list):
-                for item in d:
-                    clean_schema(item)
-            return d
+        def to_gemini_type(t: str):
+            t = t.lower()
+            if t == "string": return types.Type.STRING
+            if t == "integer": return types.Type.INTEGER
+            if t == "number": return types.Type.NUMBER
+            if t == "boolean": return types.Type.BOOLEAN
+            if t == "array": return types.Type.ARRAY
+            if t == "object": return types.Type.OBJECT
+            return types.Type.UNSPECIFIED
 
-        schema = clean_schema(copy.deepcopy(schema))
-        
-        # A simple recursive converter. The google-genai SDK accepts dicts that match the Schema structure,
-        # but sometimes requires explicit types.Schema objects. The latest SDK allows passing the dict directly!
-        return schema
+        def build_schema(d: dict) -> types.Schema:
+            t = d.get("type", "object")
+            schema = types.Schema(type=to_gemini_type(t))
+            
+            if "description" in d:
+                schema.description = d["description"]
+            if "enum" in d:
+                schema.enum = d["enum"]
+            if "properties" in d:
+                schema.properties = {k: build_schema(v) for k, v in d["properties"].items()}
+            if "required" in d:
+                schema.required = d["required"]
+            if "items" in d:
+                schema.items = build_schema(d["items"])
+                
+            return schema
+
+        return build_schema(schema_dict)
 
     def chat(self, *, model: str, messages: list[dict], temperature: float = 0.7, response_format: dict | None = None) -> object:
         system_instruction = self._extract_system_prompt(messages)

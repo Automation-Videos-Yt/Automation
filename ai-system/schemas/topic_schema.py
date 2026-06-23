@@ -22,4 +22,4 @@ class TopicOutput(BaseModel):
     title: str
     angle: str
     rationale: str
-    trend_score: float = Field(..., ge=0, le=1)
+    trend_score: float = Field(default=0.8, ge=0, le=1)

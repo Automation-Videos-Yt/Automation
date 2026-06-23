@@ -14,7 +14,7 @@ Given a niche, pick exactly ONE highly shareable video idea that:
 - Can be delivered in 60-90 seconds of narration.
 - Has a concrete, specific angle (not generic).
 - Hooks the viewer in the first sentence with curiosity or a bold claim.
-- Write title, angle, and rationale in the requested target language code.
+- Write title, angle, rationale, and a trend_score (0.0 to 1.0) in the requested target language code.
 
 If past topics from the same operator are supplied with performance data:
 - Lean TOWARD patterns that were tagged "strong" (high CTR, high avg view %).
