@@ -187,13 +187,13 @@ model AiCostRecord {
   model         String
   operation     String
   promptVersion String?
-  tokensInput  Int?
-  tokensOutput Int?
-  audioChars   Int?
-  audioSeconds Float?
-  costUsd      Float
-  latencyMs    Int?
-  createdAt    DateTime    @default(now())
+  tokensInput   Int?
+  tokensOutput  Int?
+  audioChars    Int?
+  audioSeconds  Float?
+  costUsd       Float
+  latencyMs     Int?
+  createdAt     DateTime    @default(now())
 
   @@index([runId])
   @@index([provider, model])

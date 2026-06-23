@@ -28,6 +28,7 @@ def _get_el() -> ElevenLabs:
     return _el
 
 
+def _elevenlabs_tts(text: str, voice_id: str, output_path: str) -> tuple[int, list]:
     import base64
     import json
     

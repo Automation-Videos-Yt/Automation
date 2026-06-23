@@ -50,13 +50,13 @@ export function createApp() {
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
-  app.get("/media/s3/*", async (req, res, next) => {
+  app.get("/media/s3/:key(*)", async (req, res, next) => {
     if (!env.APP_S3_BUCKET) {
       return next(); // Fallback to local static handler if S3 isn't active
     }
     
     try {
-      const key = req.params[0];
+      const key = req.params.key;
       if (!key || key.trim() === "") {
         res.status(400).json({ error: "Missing S3 object key" });
         return;
@@ -65,7 +65,7 @@ export function createApp() {
       const presignedUrl = await getPresignedS3Url(key);
       res.redirect(302, presignedUrl);
     } catch (err: any) {
-      logger.error({ err, key: req.params[0] }, "Failed to generate S3 pre-signed URL");
+      logger.error({ err, key: req.params.key }, "Failed to generate S3 pre-signed URL");
       res.status(500).json({ error: "Failed to access S3 media", details: err.message });
     }
   });
