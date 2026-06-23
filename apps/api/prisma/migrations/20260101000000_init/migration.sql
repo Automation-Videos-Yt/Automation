@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 CREATE TYPE "PipelineStage" AS ENUM ('QUEUED', 'TOPIC', 'SCRIPT', 'HOOK', 'PREDICTION', 'TIMESTAMP', 'VIDEO_SELECTION', 'VOICE', 'VIDEO', 'THUMBNAIL', 'DONE', 'FAILED');
 
 -- CreateEnum

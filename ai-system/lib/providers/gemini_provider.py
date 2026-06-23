@@ -3,7 +3,6 @@ from google import genai
 from google.genai import types
 from config import settings
 from lib.log import get_logger
-from lib.llm import usage_stats_var
 from .base_provider import BaseProvider
 
 log = get_logger("gemini_provider")
@@ -92,6 +91,7 @@ class GeminiProvider(BaseProvider):
         
         usage = getattr(response, "usage_metadata", None)
         if usage:
+            from lib.llm import usage_stats_var
             usage_stats_var.set({
                 "model": model,
                 "prompt_tokens": usage.prompt_token_count,
