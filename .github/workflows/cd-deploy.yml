@@ -10,7 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    
+
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -23,12 +23,12 @@ jobs:
         run: |
           echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
         env:
-          OWNER: '${{ github.repository_owner }}'
+          OWNER: "${{ github.repository_owner }}"
 
       - name: Execute deployment via SSM
         run: |
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["cd /home/ubuntu","mkdir -p ai_automation_videos","cd ai_automation_videos","export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}","if [ ! -d \".git\" ]; then git init && git remote add origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git; fi","git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git","git fetch origin main","git reset --hard origin/main","echo ${GITHUB_TOKEN} | docker login ghcr.io -u ${{ github.actor }} --password-stdin","export DOCKERHUB_NAMESPACE=ghcr.io/${{ env.OWNER_LC }}","export IMAGE_TAG=latest","docker compose -f docker-compose.prod.yml pull","docker compose -f docker-compose.prod.yml up -d","docker image prune -f"]' \
+            --parameters 'commands=["cd /home/ubuntu","mkdir -p ai_automation_videos","chown -R ubuntu:ubuntu ai_automation_videos","cd ai_automation_videos","git config --global --add safe.directory /home/ubuntu/ai_automation_videos","export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}","if [ ! -d \".git\" ]; then git init && git remote add origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git; fi","git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git","git fetch origin main","git reset --hard origin/main","echo ${GITHUB_TOKEN} | docker login ghcr.io -u ${{ github.actor }} --password-stdin","export DOCKERHUB_NAMESPACE=ghcr.io/${{ env.OWNER_LC }}","export IMAGE_TAG=latest","docker compose -f docker-compose.prod.yml pull","docker compose -f docker-compose.prod.yml up -d","docker image prune -f","chown -R ubuntu:ubuntu /home/ubuntu/ai_automation_videos"]' \
             --comment "Deploy latest docker images"
