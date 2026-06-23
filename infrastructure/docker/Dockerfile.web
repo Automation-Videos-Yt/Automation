@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -7,12 +7,35 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY apps/web/package.json apps/web/package.json
 
-RUN npm install --workspaces --include-workspace-root
+RUN npm install
 
 COPY apps/web apps/web
+
+WORKDIR /app/apps/web
+RUN npm run build
+
+
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Copy package descriptors for prod install
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY apps/web/package.json apps/web/package.json
+
+# Install only production dependencies
+RUN npm install --workspace=@youtube-automation/web --omit=dev --include-workspace-root
+
+# Copy compiled Next.js output and assets from builder
+COPY --from=builder /app/apps/web/.next ./apps/web/.next
+COPY --from=builder /app/apps/web/public ./apps/web/public
+COPY --from=builder /app/apps/web/next.config.mjs ./apps/web/next.config.mjs
+COPY --from=builder /app/apps/web/package.json ./apps/web/package.json
 
 WORKDIR /app/apps/web
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]
