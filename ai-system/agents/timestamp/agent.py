@@ -86,13 +86,25 @@ def run(raw_input: dict) -> dict:
             if whisper_lang:
                 req["language"] = whisper_lang
 
-            resp = client.audio.transcriptions.create(
-                **req,
-            )
+            try:
+                resp = client.audio.transcriptions.create(**req)
+            except Exception as e:
+                log.warning("OpenAI whisper failed: %s, falling back to Groq", e)
+                try:
+                    from openai import OpenAI
+                    from config import settings
+                    groq_client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+                    req["model"] = "whisper-large-v3-turbo"
+                    # Some OpenAI-compatible endpoints fail if timestamp_granularities is present
+                    req.pop("timestamp_granularities", None) 
+                    resp = groq_client.audio.transcriptions.create(**req)
+                except Exception as e2:
+                    log.error("Groq whisper also failed: %s. Proceeding without whisper.", e2)
+                    resp = None
 
     # The SDK returns a Pydantic-ish object; normalize.
-    words_raw = getattr(resp, "words", None) or []
-    total_duration = float(getattr(resp, "duration", 0.0))
+    words_raw = getattr(resp, "words", None) if resp else []
+    total_duration = float(getattr(resp, "duration", 0.0)) if resp else 0.0
 
     words: list[WordSpan] = []
     for w in words_raw:
@@ -111,7 +123,11 @@ def run(raw_input: dict) -> dict:
         log.warning("whisper returned no word timestamps; falling back to uniform distribution")
         # Fallback: uniform distribution over script_text
         tokens = [t for t in payload.script_text.split() if t]
-        if tokens and total_duration > 0:
+        if tokens:
+            if total_duration <= 0:
+                # Estimate 150 words per minute (0.4s per word)
+                total_duration = len(tokens) * 0.4
+                log.warning("whisper failed to provide duration, estimating %.2fs", total_duration)
             per = total_duration / len(tokens)
             words = [
                 WordSpan(word=t, start=i * per, end=(i + 1) * per)
