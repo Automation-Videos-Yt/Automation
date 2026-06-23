@@ -42,12 +42,12 @@ PROVIDER_MODELS = {
         TaskType.AUTOPILOT: "llama-3.1-8b-instant",
     },
     "openrouter": {
-        TaskType.TOPIC_GENERATION: "meta-llama/llama-3.1-8b-instruct:free",
-        TaskType.HOOK_GENERATION: "meta-llama/llama-3.1-8b-instruct:free",
-        TaskType.SCRIPT_WRITING: "meta-llama/llama-3.1-8b-instruct:free", 
-        TaskType.SCRIPT_EVALUATION: "meta-llama/llama-3.1-8b-instruct:free",
-        TaskType.PERFORMANCE_PREDICTION: "meta-llama/llama-3.1-8b-instruct:free",
-        TaskType.AUTOPILOT: "meta-llama/llama-3.1-8b-instruct:free",
+        TaskType.TOPIC_GENERATION: "meta-llama/llama-3.3-70b-instruct:free",
+        TaskType.HOOK_GENERATION: "meta-llama/llama-3.3-70b-instruct:free",
+        TaskType.SCRIPT_WRITING: "meta-llama/llama-3.3-70b-instruct:free", 
+        TaskType.SCRIPT_EVALUATION: "meta-llama/llama-3.3-70b-instruct:free",
+        TaskType.PERFORMANCE_PREDICTION: "meta-llama/llama-3.3-70b-instruct:free",
+        TaskType.AUTOPILOT: "meta-llama/llama-3.3-70b-instruct:free",
     },
     "openai": {
         TaskType.TOPIC_GENERATION: "gpt-4o-mini",
