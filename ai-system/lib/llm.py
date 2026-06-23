@@ -1,80 +1,87 @@
-import time
-from openai import APIError, APITimeoutError, RateLimitError
+import json
+import contextvars
 from config import settings
-from .openai_client import get_openai_client
 from .log import get_logger
+from .model_router import TaskType
+from .providers.provider_router import ProviderRouter
+from .cache import ai_cache, generate_hash
+from .prompt_registry import PromptVersion
 
 log = get_logger("llm")
 
+usage_stats_var = contextvars.ContextVar("usage_stats", default={})
 
-def chat_with_fallback(
+def chat(
     *,
-    primary_model: str,
-    fallback_model: str | None,
+    task_type: TaskType,
+    prompt_version: PromptVersion | None = None,
     messages: list[dict],
     response_format: dict | None = None,
     temperature: float = 0.7,
-    attempts: int = 2,
 ):
     """
-    Call chat.completions with:
-      - automatic retry on transient errors (rate limits, timeouts, 5xx) per model
-      - automatic fallback to a cheaper model if the primary keeps failing
-
-    Non-retryable errors (400 bad requests, schema violations) propagate immediately.
+    Facade for all agent chat completions.
+    1. Checks semantic cache (L1 Redis + L2 Postgres)
+    2. Routes to appropriate provider (OpenAI / Gemini) via ProviderRouter
+    3. Handles Fallbacks (handled inside ProviderRouter)
+    4. Sets usage statistics context for tracking
     """
-    client = get_openai_client()
-    kwargs = {"messages": messages, "temperature": temperature}
-    if response_format:
-        kwargs["response_format"] = response_format
+    input_hash = generate_hash(messages)
+    
+    # Cache Check
+    cached_output = ai_cache.get(task_type.value, input_hash)
+    if cached_output:
+        log.info("cache hit task=%s hash=%s", task_type.value, input_hash)
+        
+        # Populate context var with cache metadata (0 cost)
+        usage_stats_var.set({
+            "model": "cache",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "prompt_version": prompt_version.value if prompt_version else ""
+        })
+        
+        # To match the return type, we build a dummy unified response
+        class _MockMsg:
+            def __init__(self, content): self.content = content
+        class _MockChoice:
+            def __init__(self, content): self.message = _MockMsg(content)
+        class _MockResp:
+            def __init__(self, content): self.choices = [_MockChoice(content)]
+            
+        # We assume the cached output is a dictionary that we serialized to JSON.
+        # So we turn it back into a string because agents expect a string content.
+        return _MockResp(json.dumps(cached_output))
 
-    def try_once(model: str, attempt: int):
-        log.info("chat attempt model=%s attempt=%d", model, attempt)
-        return client.chat.completions.create(model=model, **kwargs)
-
-    candidates = [primary_model]
-    if fallback_model and fallback_model != primary_model:
-        candidates.append(fallback_model)
-
-    last_err: Exception | None = None
-    for ci, model in enumerate(candidates):
-        for attempt in range(1, attempts + 1):
-            try:
-                return try_once(model, attempt)
-            except (APITimeoutError, RateLimitError) as e:
-                last_err = e
-                wait = 0.75 * (2 ** (attempt - 1))
-                log.warning(
-                    "transient error on %s attempt %d: %s — waiting %.1fs",
-                    model,
-                    attempt,
-                    type(e).__name__,
-                    wait,
-                )
-                time.sleep(wait)
-            except APIError as e:
-                last_err = e
-                status = getattr(e, "status_code", None)
-                if status is not None and status >= 500:
-                    wait = 0.75 * (2 ** (attempt - 1))
-                    log.warning(
-                        "server error %s on %s attempt %d — waiting %.1fs",
-                        status,
-                        model,
-                        attempt,
-                        wait,
-                    )
-                    time.sleep(wait)
-                else:
-                    # 4xx: not retryable, not fallback-eligible (schema bug).
-                    raise
-        # Exhausted attempts on this model; try next candidate if any.
-        if ci < len(candidates) - 1:
-            log.warning(
-                "primary model %s exhausted retries — falling back to %s",
-                model,
-                candidates[ci + 1],
-            )
-
-    assert last_err is not None
-    raise last_err
+    # Real LLM Call
+    response = ProviderRouter.chat(
+        task_type=task_type,
+        messages=messages,
+        temperature=temperature,
+        response_format=response_format
+    )
+    
+    # We grab the usage stats that the provider set
+    stats = usage_stats_var.get()
+    
+    # Inject prompt version
+    if prompt_version:
+        stats["prompt_version"] = prompt_version.value
+        usage_stats_var.set(stats)
+        
+    # Store in Cache if it's a JSON response (so we can safely serialize it)
+    content = response.choices[0].message.content
+    try:
+        data = json.loads(content)
+        ai_cache.set(
+            task_type=task_type.value,
+            input_hash=input_hash,
+            output=data,
+            provider=stats.get("model", ""), # rough heuristic
+            model=stats.get("model", "")
+        )
+    except json.JSONDecodeError:
+        log.warning("could not cache response because it is not valid JSON")
+        
+    return response

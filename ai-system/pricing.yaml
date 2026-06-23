@@ -1,0 +1,25 @@
+openai:
+  gpt-4o:
+    input: 2.50
+    output: 10.00
+  gpt-4o-mini:
+    input: 0.15
+    output: 0.60
+  text-embedding-3-small:
+    input: 0.02
+    output: 0.0
+
+gemini:
+  gemini-2.5-flash:
+    input: 0.075
+    output: 0.30
+
+elevenlabs:
+  eleven_turbo_v2_5:
+    char: 0.18 # per 1000 chars
+
+openai_tts:
+  tts-1-hd:
+    char: 0.033 # per 1000 chars
+  tts-1:
+    char: 0.015 # per 1000 chars

@@ -1,6 +1,7 @@
 import axios, { AxiosError } from "axios";
 import { env } from "../config/env";
 import { scoped } from "../lib/logger";
+import { FatalError, TransientError } from "../lib/errors";
 
 const log = scoped("ai-client");
 
@@ -34,6 +35,7 @@ export type RunAgentCtx = {
   runId?: string;
   retries?: number; // total attempts = retries + 1
   backoffMs?: number; // base for exponential backoff
+  onMeta?: (meta: Record<string, string>) => void;
 };
 
 export async function runAgent<TInput extends object, TOutput>(
@@ -53,11 +55,14 @@ export async function runAgent<TInput extends object, TOutput>(
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const { data } = await http.post(`/agents/${agentName}/run`, input, {
+      const { data, headers } = await http.post(`/agents/${agentName}/run`, input, {
         headers: ctx?.runId
           ? { "x-request-id": ctx.runId.slice(0, 12) }
           : undefined,
       });
+      if (ctx?.onMeta && headers) {
+        ctx.onMeta(headers as Record<string, string>);
+      }
       const durationMs = Date.now() - started;
       if (attempt > 0) {
         runLog.info(
@@ -86,7 +91,16 @@ export async function runAgent<TInput extends object, TOutput>(
         } else {
           runLog.error({ durationMs, attempt, err }, `agent ${agentName} error (giving up)`);
         }
-        throw err;
+        
+        const message = axios.isAxiosError(err) 
+            ? `AI Agent ${agentName} failed: ${err.response?.status} ${JSON.stringify(err.response?.data)}`
+            : `AI Agent ${agentName} failed: ${err instanceof Error ? err.message : String(err)}`;
+            
+        if (!isRetryable(err)) {
+            throw new FatalError(message);
+        } else {
+            throw new TransientError(message);
+        }
       }
       const delay = backoffMs * Math.pow(2, attempt);
       runLog.warn(

@@ -29,6 +29,7 @@ from .editor_notes_schema import (
     EditorNotesSceneInput,
     EditorNotesSceneOutput,
 )
+from .script_eval_schema import ScriptEvalInput, ScriptEvalOutput
 
 __all__ = [
     "TopicInput",
@@ -69,4 +70,6 @@ __all__ = [
     "EditorNotesOutput",
     "EditorNotesSceneInput",
     "EditorNotesSceneOutput",
+    "ScriptEvalInput",
+    "ScriptEvalOutput",
 ]

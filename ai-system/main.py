@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from lib.log import setup_logging, get_logger, new_request_id, get_request_id, set_request_id
 from lib.embeddings import embed, EMBEDDING_DIMS, EMBEDDING_MODEL
+from lib.llm import usage_stats_var
 from orchestrator.agent_runner import AgentNotFound, dispatch
 
 setup_logging()
@@ -35,6 +36,15 @@ async def request_logger(request: Request, call_next):
         elapsed,
     )
     response.headers["x-request-id"] = rid
+    
+    usage = usage_stats_var.get()
+    if usage:
+        response.headers["x-openai-model"] = usage.get("model", "")
+        response.headers["x-openai-prompt-tokens"] = str(usage.get("prompt_tokens", 0))
+        response.headers["x-openai-completion-tokens"] = str(usage.get("completion_tokens", 0))
+        if usage.get("prompt_version"):
+            response.headers["x-ai-prompt-version"] = str(usage.get("prompt_version"))
+        
     return response
 
 
@@ -84,7 +94,7 @@ async def run_agent(agent_name: str, request: Request) -> object:
         raise HTTPException(status_code=400, detail=ve.errors())
     except Exception as e:
         log.exception("agent=%s failed", agent_name)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An unexpected internal server error occurred")
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     log.info("agent=%s ok in %dms", agent_name, elapsed_ms)
@@ -94,4 +104,7 @@ async def run_agent(agent_name: str, request: Request) -> object:
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     log.exception("unhandled error rid=%s", get_request_id())
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    return JSONResponse(
+        status_code=500, 
+        content={"error": "InternalServerError", "detail": "An unexpected internal server error occurred"}
+    )

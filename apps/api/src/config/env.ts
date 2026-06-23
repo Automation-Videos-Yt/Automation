@@ -26,6 +26,8 @@ const schema = z
     ENABLE_LANGCHAIN_COST_ANALYSIS: z.coerce.boolean().default(true),
     ENABLE_AGENTIC_COST_AUTOPILOT: z.coerce.boolean().default(true),
     STORAGE_PATH: z.string().default("/storage"),
+    APP_S3_BUCKET: z.string().optional(),
+    AWS_REGION: z.string().default("us-east-1"),
     PUBLIC_API_URL: z.string().url().default("http://localhost:4000"),
     YOUTUBE_CLIENT_ID: z.string().optional(),
     YOUTUBE_CLIENT_SECRET: z.string().optional(),

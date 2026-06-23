@@ -3,6 +3,7 @@ import path from "node:path";
 import { env } from "../config/env";
 import { runAgent } from "../clients/aiClient";
 import { fileExists } from "../cache/cache-resume";
+import { uploadFileToS3 } from "../lib/s3";
 import {
   completeStage,
   createStageErrorHandler,
@@ -93,11 +94,23 @@ export const thumbnailStage: PipelineStage = {
           ),
       );
 
+      let finalThumbPath = thumbnail.image_path;
+      if (env.APP_S3_BUCKET) {
+        try {
+          const s3Key = `thumbnails/${context.runId}.png`;
+          finalThumbPath = await uploadFileToS3(thumbnail.image_path, s3Key);
+          context.logger.info({ stage: STAGE, runId: context.runId }, "Thumbnail uploaded to S3");
+        } catch (err) {
+          context.logger.error({ stage: STAGE, runId: context.runId, err }, "Thumbnail S3 upload failed");
+        }
+      }
+
       await context.prisma.video.update({
         where: { runId: context.runId },
-        data: { thumbnailPath: thumbnail.image_path },
+        data: { thumbnailPath: finalThumbPath },
       });
 
+      thumbnail.image_path = finalThumbPath;
       context.cache.thumbnail = thumbnail;
       await completeStage(context, STAGE, AGENT, {
         quality: tier.quality,

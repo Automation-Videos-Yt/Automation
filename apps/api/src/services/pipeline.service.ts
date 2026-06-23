@@ -240,48 +240,6 @@ function normalizeLanguageCodes(codes: string[]): string[] {
   return normalized.length > 0 ? normalized : ["en"];
 }
 
-/**
- * Queue N pipeline runs per selected language in one call. Each run is
- * independent — the duplicate-topic guard in the worker helps prevent
- * two same-language batch members from landing on the same topic.
- */
-export async function createPipelineBatch(
-  niche: string,
-  count: number,
-  durationSec = 75,
-  languageCodes: string[] = ["en"],
-  features?: Partial<RunFeatures>,
-) {
-  const normalizedLanguageCodes = normalizeLanguageCodes(languageCodes);
-  const normalizedFeatures = normalizeRunFeatures(features);
-  validateRunFeatures(normalizedFeatures);
-  const runs = [];
-  for (let i = 0; i < count; i++) {
-    for (const languageCode of normalizedLanguageCodes) {
-      runs.push(
-        await createPipelineRun(
-          niche,
-          durationSec,
-          languageCode,
-          normalizedFeatures,
-        ),
-      );
-    }
-  }
-  log.info(
-    {
-      niche,
-      count,
-      languageCodes: normalizedLanguageCodes,
-      features: normalizedFeatures,
-      totalRuns: runs.length,
-      runIds: runs.map((r) => r.id),
-    },
-    "batch created",
-  );
-  return runs;
-}
-
 export async function createPipelineRun(
   niche: string,
   durationSec = 75,

@@ -8,6 +8,7 @@ import { downloadClip } from "../media/clipDownload";
 import { prepareSceneClip } from "../media/clipPrep";
 import { composeFinalVideo } from "../media/compose";
 import { generateSrtFromWords } from "../media/subtitles";
+import { uploadFileToS3 } from "../lib/s3";
 import {
   completeStage,
   createStageErrorHandler,
@@ -154,17 +155,29 @@ export const videoStage: PipelineStage = {
       runId: context.runId,
     });
 
+    let finalVideoPath = videoPath;
+    if (env.APP_S3_BUCKET) {
+      try {
+        context.logger.info({ stage: STAGE, runId: context.runId }, "Uploading final video to S3...");
+        const s3Key = `videos/${context.runId}.mp4`;
+        finalVideoPath = await uploadFileToS3(videoPath, s3Key);
+        context.logger.info({ stage: STAGE, runId: context.runId, s3Url: finalVideoPath }, "S3 upload complete");
+      } catch (error) {
+        context.logger.error({ stage: STAGE, runId: context.runId, err: error }, "Failed to upload video to S3");
+      }
+    }
+
     await context.prisma.video.upsert({
       where: { runId: context.runId },
       create: {
         runId: context.runId,
-        videoPath,
+        videoPath: finalVideoPath,
         title: meta.title,
         description: meta.description,
         tags: meta.tags,
       },
       update: {
-        videoPath,
+        videoPath: finalVideoPath,
         title: meta.title,
         description: meta.description,
         tags: meta.tags,
@@ -172,14 +185,14 @@ export const videoStage: PipelineStage = {
     });
 
     context.cache.videoMeta = meta;
-    context.cache.finalVideoPath = videoPath;
+    context.cache.finalVideoPath = finalVideoPath;
     await completeStage(context, STAGE, AGENT, {
       sceneCount: sceneClipPaths.length,
       metaCached: Boolean(cachedMeta),
       subtitleEnabled: Boolean(subtitlePath),
-      videoPath,
+      videoPath: finalVideoPath,
     });
-    return { success: true, data: { videoPath, meta } };
+    return { success: true, data: { videoPath: finalVideoPath, meta } };
   },
   onError: createStageErrorHandler(STAGE, AGENT),
 };

@@ -56,8 +56,7 @@ export default function HomePage() {
   const [niche, setNiche] = useState("");
   const [durationSec, setDurationSec] = useState<number>(75);
   const [custom, setCustom] = useState(false);
-  const [count, setCount] = useState<number>(1);
-  const [languageCodes, setLanguageCodes] = useState<string[]>(["en"]);
+  const [languageCode, setLanguageCode] = useState<string>("en");
   const [features, setFeatures] = useState<RunFeatureToggles>({
     enableTimestamp: true,
     enableSubtitles: true,
@@ -66,17 +65,8 @@ export default function HomePage() {
   });
   const router = useRouter();
 
-  const plannedRuns = count * Math.max(languageCodes.length, 1);
-  const isMultiCreate = count > 1 || languageCodes.length > 1;
-
   function toggleLanguage(code: string) {
-    setLanguageCodes((prev) => {
-      if (prev.includes(code)) {
-        // Always keep at least one language selected.
-        return prev.length > 1 ? prev.filter((c) => c !== code) : prev;
-      }
-      return [...prev, code];
-    });
+    setLanguageCode(code);
   }
 
   function toggleFeature(key: keyof RunFeatureToggles) {
@@ -102,32 +92,17 @@ export default function HomePage() {
     onSuccess: (run) => router.push(`/runs/${run.id}`),
   });
 
-  const batch = useMutation({
-    mutationFn: (v: {
-      niche: string;
-      durationSec: number;
-      count: number;
-      languageCodes: string[];
-      features: RunFeatureToggles;
-    }) =>
-      api.createBatch(
-        v.niche,
-        v.count,
-        v.durationSec,
-        v.languageCodes,
-        v.features,
-      ),
-    onSuccess: () => router.push("/runs"),
-  });
-
-  const pending = single.isPending || batch.isPending;
-  const err = single.error ?? batch.error;
+  const pending = single.isPending;
+  const err = single.error;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Generate a video</h1>
-        <p className="text-white/60 mt-1">
+    <div className="space-y-8 relative">
+      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-500/10 blur-[120px] pointer-events-none rounded-full" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[100px] pointer-events-none rounded-full" />
+      
+      <div className="relative z-10">
+        <h1 className="text-4xl font-bold tracking-tight text-white drop-shadow-sm">Generate a video</h1>
+        <p className="text-white/60 mt-2 text-lg max-w-2xl leading-relaxed">
           Pick a niche and duration. The pipeline picks a topic, writes a
           script, generates TTS, and renders a vertical video with burned-in
           subtitles.
@@ -139,31 +114,21 @@ export default function HomePage() {
           e.preventDefault();
           const trimmed = niche.trim();
           if (trimmed.length < 3) return;
-          if (isMultiCreate) {
-            batch.mutate({
-              niche: trimmed,
-              durationSec,
-              count,
-              languageCodes,
-              features,
-            });
-          } else {
-            single.mutate({
-              niche: trimmed,
-              durationSec,
-              languageCode: languageCodes[0] ?? "en",
-              features,
-            });
-          }
+          single.mutate({
+            niche: trimmed,
+            durationSec,
+            languageCode,
+            features,
+          });
         }}
-        className="space-y-4 max-w-xl"
+        className="space-y-6 max-w-xl bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 sm:p-8 rounded-2xl shadow-2xl relative z-10"
       >
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-3">
           <input
             value={niche}
             onChange={(e) => setNiche(e.target.value)}
             placeholder="e.g. productivity hacks"
-            className="flex-1 rounded-md bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
+            className="flex-1 rounded-xl bg-black/20 border border-white/10 px-4 py-3 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-inner text-base"
             minLength={3}
             maxLength={120}
             required
@@ -171,15 +136,9 @@ export default function HomePage() {
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md bg-white text-black px-4 py-2 font-medium disabled:opacity-50"
+            className="rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-6 py-3 font-semibold shadow-lg hover:shadow-indigo-500/25 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
           >
-            {pending
-              ? isMultiCreate
-                ? `Queueing ${plannedRuns}…`
-                : "Starting..."
-              : isMultiCreate
-                ? `Start ${plannedRuns} runs`
-                : "Start run"}
+            {pending ? "Starting..." : "Start run"}
           </button>
         </div>
 
@@ -198,10 +157,10 @@ export default function HomePage() {
                     setDurationSec(p.value);
                     setCustom(false);
                   }}
-                  className={`text-sm rounded-md border px-3 py-1.5 ${
+                  className={`text-sm rounded-lg border px-4 py-2 font-medium transition-all ${
                     active
-                      ? "bg-white text-black border-white"
-                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                      ? "bg-indigo-500/20 text-indigo-200 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+                      : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
                   }`}
                 >
                   {p.label}
@@ -211,10 +170,10 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setCustom(true)}
-              className={`text-sm rounded-md border px-3 py-1.5 ${
+              className={`text-sm rounded-lg border px-4 py-2 font-medium transition-all ${
                 custom
-                  ? "bg-white text-black border-white"
-                  : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                  ? "bg-indigo-500/20 text-indigo-200 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+                  : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
               }`}
             >
               Custom
@@ -230,7 +189,7 @@ export default function HomePage() {
                     Math.max(10, Math.min(180, Number(e.target.value) || 10)),
                   )
                 }
-                className="w-24 rounded-md bg-white/5 border border-white/10 px-2 py-1.5 text-sm"
+                className="w-24 rounded-lg bg-black/20 border border-white/10 px-3 py-2 text-sm outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-inner"
               />
             )}
           </div>
@@ -245,16 +204,16 @@ export default function HomePage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {LANGUAGE_OPTIONS.map((lang) => {
-              const active = languageCodes.includes(lang.code);
+              const active = languageCode === lang.code;
               return (
                 <button
                   key={lang.code}
                   type="button"
                   onClick={() => toggleLanguage(lang.code)}
-                  className={`text-sm rounded-md border px-3 py-1.5 ${
+                  className={`text-sm rounded-lg border px-4 py-2 font-medium transition-all ${
                     active
-                      ? "bg-white text-black border-white"
-                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                      ? "bg-indigo-500/20 text-indigo-200 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+                      : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white"
                   }`}
                 >
                   {lang.label}
@@ -263,8 +222,7 @@ export default function HomePage() {
             })}
           </div>
           <div className="text-xs text-white/50">
-            Select one or more languages. Each selected language generates its
-            own video run.
+            Select a language for the video run.
           </div>
         </div>
 
@@ -280,10 +238,10 @@ export default function HomePage() {
                   key={feature.key}
                   type="button"
                   onClick={() => toggleFeature(feature.key)}
-                  className={`text-left rounded-md border px-3 py-2 transition-colors ${
+                  className={`text-left rounded-xl border px-4 py-3 transition-all flex flex-col justify-center ${
                     active
-                      ? "bg-white text-black border-white"
-                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                      ? "bg-indigo-500/10 border-indigo-500/40 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
+                      : "bg-white/5 border-white/10 hover:bg-white/10"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -293,8 +251,8 @@ export default function HomePage() {
                     </span>
                   </div>
                   <div
-                    className={`text-xs mt-1 ${
-                      active ? "text-black/70" : "text-white/55"
+                    className={`text-xs mt-1 leading-relaxed ${
+                      active ? "text-indigo-200/80" : "text-white/50"
                     }`}
                   >
                     {feature.hint}
@@ -309,32 +267,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <div className="text-xs uppercase tracking-wider text-white/50">
-            Batch size
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {[1, 3, 5, 10].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setCount(n)}
-                className={`text-sm rounded-md border px-3 py-1.5 ${
-                  count === n
-                    ? "bg-white text-black border-white"
-                    : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
-                }`}
-              >
-                {n === 1 ? "Single" : `×${n}`}
-              </button>
-            ))}
-            <span className="text-xs text-white/50">
-              planned jobs: {plannedRuns} ({count} per language ×{" "}
-              {languageCodes.length} language
-              {languageCodes.length === 1 ? "" : "s"})
-            </span>
-          </div>
-        </div>
+
       </form>
 
       {err && (

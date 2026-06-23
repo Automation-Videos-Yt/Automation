@@ -22,16 +22,16 @@ export type ScriptOutput = {
   duration_estimate_sec: number;
 };
 
-export type HookVariantOut = {
-  text: string;
+export type ScriptEvalOutput = {
   score: number;
-  reasoning: string;
+  passed: boolean;
+  feedback: string[];
 };
 
 export type HookOutput = {
-  variants: HookVariantOut[];
-  chosen_index: number;
-  chosen_text: string;
+  winning_hook: string;
+  hook_score: number;
+  generation_count: number;
 };
 
 export type PredictionOutput = {
@@ -45,6 +45,12 @@ export type VoiceOutput = {
   audio_path: string;
   duration_sec: number;
   voice_id: string;
+  provider?: string;
+  word_timestamps?: {
+    word: string;
+    start: number;
+    end: number;
+  }[];
 };
 
 export type WordSpanOut = {

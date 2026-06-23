@@ -20,7 +20,10 @@ const schema = z
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().url(),
     AI_SERVICE_URL: z.string().url(),
+    API_URL: z.string().url().default("http://api:4000"),
     STORAGE_PATH: z.string().default("/storage"),
+    APP_S3_BUCKET: z.string().optional(),
+    AWS_REGION: z.string().default("us-east-1"),
     WORKER_ROLE: z
       .enum(["all", "video", "upload", "enrichment"])
       .default("all"),
@@ -63,6 +66,24 @@ const schema = z
     AUTO_UPLOAD_DELAY_MINUTES: z.coerce.number().int().min(0).default(0),
     ANALYTICS_SYNC_CRON: z.string().default("0 */6 * * *"),
     ENABLE_ANALYTICS_CRON: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    ELEVENLABS_THRESHOLD: z.coerce.number().min(0).max(10).default(9.0),
+    PREMIUM_THRESHOLD: z.coerce.number().min(0).max(10).default(8.0),
+    ENABLE_GEMINI: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    ENABLE_CACHE: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    ENABLE_OPENAI_FALLBACK: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    ENABLE_SCRIPT_RETRIES: z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),

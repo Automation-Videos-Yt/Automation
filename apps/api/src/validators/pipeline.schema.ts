@@ -39,13 +39,3 @@ export const createRunSchema = z.object({
 });
 
 export type CreateRunInput = z.infer<typeof createRunSchema>;
-
-export const createBatchSchema = z.object({
-  niche: z.string().trim().min(3).max(120),
-  count: z.coerce.number().int().min(1).max(10),
-  durationSec: z.coerce.number().int().min(10).max(180).default(75),
-  languageCodes: z.array(languageCodeSchema).min(1).max(8).default(["en"]),
-  features: runFeaturesSchema.optional(),
-});
-
-export type CreateBatchInput = z.infer<typeof createBatchSchema>;

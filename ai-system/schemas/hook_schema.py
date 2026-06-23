@@ -26,6 +26,6 @@ class HookVariant(BaseModel):
 
 
 class HookOutput(BaseModel):
-    variants: list[HookVariant]
-    chosen_index: int
-    chosen_text: str
+    winning_hook: str
+    hook_score: float
+    generation_count: int

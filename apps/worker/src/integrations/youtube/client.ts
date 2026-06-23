@@ -4,9 +4,11 @@ import { env } from "../../config/env";
 import { scoped } from "../../lib/logger";
 import { decryptSecret, encryptSecret } from "../../lib/secret-crypto";
 
+import { FatalError } from "../../lib/errors";
+
 const log = scoped("yt-oauth-lib");
 
-export class NotConnectedError extends Error {
+export class NotConnectedError extends FatalError {
   code = "NOT_CONNECTED" as const;
   constructor() {
     super("no connected YouTube account");

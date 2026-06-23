@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { scoped } from "../lib/logger";
+import { AppError } from "../lib/errors";
 
 const log = scoped("error");
 
@@ -19,7 +20,20 @@ export function errorHandler(
     return;
   }
 
+  if (err instanceof AppError) {
+    log.warn({ status: err.statusCode, message: err.message, details: err.details }, "app error");
+    res.status(err.statusCode).json({
+      error: err.name,
+      message: err.message,
+      details: err.details,
+    });
+    return;
+  }
+
+  // Completely obscure internal errors to avoid leaking schemas or keys
   log.error({ err }, "unhandled api error");
-  const message = err instanceof Error ? err.message : "Internal server error";
-  res.status(500).json({ error: "InternalServerError", message });
+  res.status(500).json({ 
+    error: "InternalServerError", 
+    message: "An unexpected internal server error occurred" 
+  });
 }

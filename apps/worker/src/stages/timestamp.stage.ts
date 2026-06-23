@@ -58,6 +58,35 @@ function buildFallbackScenesFromNarration(opts: {
   });
 }
 
+function buildScenesFromWords(
+  words: { word: string; start: number; end: number }[],
+  targetSceneSec: number,
+) {
+  const scenes = [];
+  let currentSceneWords: string[] = [];
+  let currentSceneStart = words[0]?.start ?? 0;
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (currentSceneWords.length === 0) {
+      currentSceneStart = w.start;
+    }
+    currentSceneWords.push(w.word);
+    const duration = w.end - currentSceneStart;
+    
+    if (duration >= targetSceneSec || i === words.length - 1) {
+      scenes.push({
+        index: scenes.length,
+        start: currentSceneStart,
+        end: w.end,
+        text: currentSceneWords.join(" "),
+      });
+      currentSceneWords = [];
+    }
+  }
+  return scenes;
+}
+
 export const timestampStage: PipelineStage = {
   name: STAGE,
   async execute(context) {
@@ -100,6 +129,23 @@ export const timestampStage: PipelineStage = {
     }
 
     const targetSceneSec = 3;
+
+    // Check for native timestamps from Voice Stage
+    if (voice.word_timestamps && voice.word_timestamps.length > 0) {
+      const nativeTimestamp: TimestampOutput = {
+        total_duration_sec: voice.duration_sec,
+        words: voice.word_timestamps,
+        scenes: buildScenesFromWords(voice.word_timestamps, targetSceneSec),
+      };
+
+      context.cache.timestamp = nativeTimestamp;
+      await completeStage(context, STAGE, AGENT, {
+        native: true,
+        words: nativeTimestamp.words.length,
+        scenes: nativeTimestamp.scenes.length,
+      });
+      return { success: true, data: nativeTimestamp };
+    }
     const timestampInput = {
       audio_path: voice.audio_path,
       script_text: narration,

@@ -1,8 +1,10 @@
 import json
 from config import settings
 from schemas import TopicInput, TopicOutput
+from lib.prompt_registry import PromptVersion
 from lib.log import get_logger, timed
-from lib.openai_client import get_openai_client
+from lib.llm import chat
+from lib.model_router import TaskType
 
 log = get_logger("agent.topic")
 
@@ -75,7 +77,6 @@ def _exclude_block(payload: TopicInput) -> str:
 
 def run(raw_input: dict) -> dict:
     payload = TopicInput.model_validate(raw_input)
-    client = get_openai_client()
     log.info(
         "niche=%s language=%s past=%d",
         payload.niche,
@@ -90,24 +91,16 @@ def run(raw_input: dict) -> dict:
         f"{_exclude_block(payload)}"
     )
 
-    with timed(log, "openai.chat.completions", model=settings.openai_model_fast):
-        response = client.chat.completions.create(
-            model=settings.openai_model_fast,
+    with timed(log, "llm.chat", task="topic_generation"):
+        response = chat(
+            task_type=TaskType.TOPIC_GENERATION,
+            prompt_version=PromptVersion.TOPIC_V1,
             temperature=0.9,
             response_format=RESPONSE_FORMAT,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-        )
-
-    usage = getattr(response, "usage", None)
-    if usage:
-        log.info(
-            "tokens in=%s out=%s total=%s",
-            usage.prompt_tokens,
-            usage.completion_tokens,
-            usage.total_tokens,
         )
 
     content = response.choices[0].message.content or "{}"

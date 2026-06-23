@@ -18,7 +18,9 @@ const STAGE = "VOICE" as const;
 const AGENT = "voice";
 
 function voiceTierFromScore(score: number): "elite" | "premium" | "economy" {
-  return score >= 7.5 ? "premium" : "economy";
+  if (score >= env.ELEVENLABS_THRESHOLD) return "elite";
+  if (score >= env.PREMIUM_THRESHOLD) return "premium";
+  return "economy";
 }
 
 export const voiceStage: PipelineStage = {

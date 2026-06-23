@@ -1,12 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 import {
-  createBatchSchema,
   createRunSchema,
 } from "../validators/pipeline.schema";
 import {
   cancelPipelineRun,
   PipelineServiceError,
-  createPipelineBatch,
   createPipelineRun,
   getHookExperiment,
   getPipelineLogs,
@@ -34,26 +32,6 @@ export async function postRun(req: Request, res: Response, next: NextFunction) {
       input.features,
     );
     res.status(201).json(run);
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function postBatch(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    const input = createBatchSchema.parse(req.body);
-    const runs = await createPipelineBatch(
-      input.niche,
-      input.count,
-      input.durationSec,
-      input.languageCodes,
-      input.features,
-    );
-    res.status(201).json({ count: runs.length, runs });
   } catch (err) {
     next(err);
   }

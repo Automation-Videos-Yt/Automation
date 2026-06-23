@@ -28,21 +28,53 @@ def _get_el() -> ElevenLabs:
     return _el
 
 
-def _elevenlabs_tts(text: str, voice_id: str, output_path: str) -> int:
-    client = _get_el()
-    audio_iter = client.text_to_speech.convert(
-        voice_id=voice_id,
-        model_id="eleven_turbo_v2_5",
-        output_format="mp3_44100_128",
-        text=text,
-    )
-    total = 0
+    import base64
+    import json
+    
+    # Use ElevenLabs REST API directly for with_timestamps feature
+    import httpx
+    
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
+    headers = {
+        "Content-Type": "application/json",
+        "xi-api-key": settings.elevenlabs_api_key
+    }
+    data = {
+        "text": text,
+        "model_id": "eleven_turbo_v2_5",
+        "output_format": "mp3_44100_128"
+    }
+    
+    response = httpx.post(url, headers=headers, json=data, timeout=60.0)
+    response.raise_for_status()
+    result = response.json()
+    
+    audio_bytes = base64.b64decode(result["audio_base64"])
     with open(output_path, "wb") as f:
-        for chunk in audio_iter:
-            if chunk:
-                f.write(chunk)
-                total += len(chunk)
-    return total
+        f.write(audio_bytes)
+        
+    alignments = result.get("alignment", {})
+    chars = alignments.get("characters", [])
+    times = alignments.get("character_start_times_seconds", [])
+    end_times = alignments.get("character_end_times_seconds", [])
+    
+    word_timestamps = []
+    if chars and times and end_times:
+        current_word = ""
+        word_start = times[0]
+        for i, char in enumerate(chars):
+            if char.strip() == "":
+                if current_word:
+                    word_timestamps.append({"word": current_word, "start": word_start, "end": end_times[i-1]})
+                    current_word = ""
+                if i + 1 < len(times):
+                    word_start = times[i+1]
+            else:
+                current_word += char
+        if current_word:
+            word_timestamps.append({"word": current_word, "start": word_start, "end": end_times[-1]})
+            
+    return len(audio_bytes), word_timestamps
 
 
 def _openai_tts(model: str, text: str, voice: str, output_path: str) -> int:
@@ -73,13 +105,12 @@ def run(raw_input: dict) -> dict:
 
     os.makedirs(os.path.dirname(payload.output_path), exist_ok=True)
 
-    provider_used: str
-    bytes_written = 0
+    word_timestamps = None
 
     if tier == "elite":
         try:
             with timed(log, "elevenlabs.tts", chars=chars, voice_id=voice_id):
-                bytes_written = _elevenlabs_tts(
+                bytes_written, word_timestamps = _elevenlabs_tts(
                     payload.text, voice_id, payload.output_path
                 )
             provider_used = "elevenlabs"
@@ -125,9 +156,13 @@ def run(raw_input: dict) -> dict:
         duration,
     )
 
-    return VoiceOutput(
-        audio_path=payload.output_path,
-        duration_sec=duration,
-        voice_id=voice_id,
-        provider=provider_used,
-    ).model_dump()
+    out = {
+        "audio_path": payload.output_path,
+        "duration_sec": duration,
+        "voice_id": voice_id,
+        "provider": provider_used,
+    }
+    if word_timestamps:
+        out["word_timestamps"] = word_timestamps
+        
+    return VoiceOutput.model_validate(out).model_dump()

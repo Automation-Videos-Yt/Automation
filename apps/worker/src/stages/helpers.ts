@@ -21,6 +21,13 @@ export const TARGET_HEIGHT = 1920;
 export const TARGET_ORIENTATION = "portrait";
 export const USER_CANCELLED_MESSAGE = "cancelled by user";
 
+const GPT_4O_INPUT_COST = 2.5;
+const GPT_4O_OUTPUT_COST = 10.0;
+const GPT_4O_MINI_INPUT_COST = 0.15;
+const GPT_4O_MINI_OUTPUT_COST = 0.6;
+const GEMINI_FLASH_INPUT_COST = 0.075;
+const GEMINI_FLASH_OUTPUT_COST = 0.3;
+
 export const DEFAULT_RUN_FEATURES: RunFeatures = {
   enableTimestamp: true,
   enableSubtitles: true,
@@ -85,22 +92,63 @@ export async function withAgentLog<T>(
   runId: string,
   agent: string,
   input: unknown,
-  fn: () => Promise<T>,
+  fn: (onMeta: (meta: any) => void) => Promise<T>,
 ): Promise<T> {
   const started = Date.now();
+  let meta: any | undefined;
 
   try {
-    const output = await fn();
+    const output = await fn((m) => { meta = m; });
+    const durationMs = Date.now() - started;
+
     await prisma.agentLog.create({
       data: {
         runId,
         agent,
         inputJson: input as object,
         outputJson: output as object,
-        durationMs: Date.now() - started,
+        durationMs,
         status: "SUCCESS",
       },
     });
+    
+    if (meta) {
+      let inputPrice = 0;
+      let outputPrice = 0;
+
+      if (meta.model.includes("gpt-4o-mini")) {
+        inputPrice = GPT_4O_MINI_INPUT_COST;
+        outputPrice = GPT_4O_MINI_OUTPUT_COST;
+      } else if (meta.model.includes("gpt-4o")) {
+        inputPrice = GPT_4O_INPUT_COST;
+        outputPrice = GPT_4O_OUTPUT_COST;
+      } else if (meta.model.includes("gemini")) {
+        inputPrice = GEMINI_FLASH_INPUT_COST;
+        outputPrice = GEMINI_FLASH_OUTPUT_COST;
+      }
+
+      const costUsd =
+        (meta.promptTokens / 1000000) * inputPrice +
+        (meta.completionTokens / 1000000) * outputPrice;
+      
+      let provider = "openai";
+      if (meta.model.includes("gemini")) provider = "gemini";
+
+      await prisma.aiCostRecord.create({
+        data: {
+          runId,
+          provider,
+          model: meta.model,
+          promptVersion: meta.promptVersion,
+          operation: agent,
+          tokensInput: meta.promptTokens,
+          tokensOutput: meta.completionTokens,
+          costUsd,
+          latencyMs: durationMs,
+        }
+      });
+    }
+    
     return output;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

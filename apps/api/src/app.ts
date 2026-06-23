@@ -1,3 +1,4 @@
+import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
@@ -6,8 +7,10 @@ import { pipelineRouter } from "./routes/pipeline";
 import { youtubeRouter } from "./routes/youtube";
 import { analyticsRouter } from "./routes/analytics";
 import { costRouter } from "./routes/cost";
+import { scheduleRouter } from "./routes/schedule";
 import { errorHandler } from "./middleware/error";
 import { logger } from "./lib/logger";
+import { getPresignedS3Url } from "./lib/s3";
 
 export function createApp() {
   const app = express();
@@ -47,10 +50,31 @@ export function createApp() {
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
+  app.get("/media/s3/*", async (req, res, next) => {
+    if (!env.APP_S3_BUCKET) {
+      return next(); // Fallback to local static handler if S3 isn't active
+    }
+    
+    try {
+      const key = req.params[0];
+      if (!key || key.trim() === "") {
+        res.status(400).json({ error: "Missing S3 object key" });
+        return;
+      }
+      
+      const presignedUrl = await getPresignedS3Url(key);
+      res.redirect(302, presignedUrl);
+    } catch (err: any) {
+      logger.error({ err, key: req.params[0] }, "Failed to generate S3 pre-signed URL");
+      res.status(500).json({ error: "Failed to access S3 media", details: err.message });
+    }
+  });
+
   app.use("/pipeline", pipelineRouter);
   app.use("/auth", youtubeRouter);
   app.use("/analytics", analyticsRouter);
   app.use("/cost", costRouter);
+  app.use("/schedules", scheduleRouter);
 
   app.use("/media", express.static(env.STORAGE_PATH, { fallthrough: true }));
 

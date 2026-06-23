@@ -6,6 +6,7 @@ import { runUpload } from "./upload/upload-runner";
 import { runEnrichment } from "./enrichment/enrichment-runner";
 import { startAnalyticsSyncCron } from "./cron/analytics-sync";
 import { logger, scoped } from "./lib/logger";
+import axios from "axios";
 import type { RunControlOverrides, RunFeatures } from "./queues/videoQueue";
 
 const log = scoped("worker");
@@ -157,8 +158,41 @@ if (shouldRunEnrichment) {
 }
 
 // ------------------------------------------------------------
-// Scheduled jobs
+// Scheduled jobs (Cron runners via BullMQ)
 // ------------------------------------------------------------
+if (shouldRunVideo || role === "all") {
+  const scheduleWorker = new Worker<{ scheduleId: string; niche: string; languageCode: string }>(
+    "scheduleQueue",
+    async (job) => {
+      const jobLog = scoped("schedule-worker", job.data.scheduleId);
+      jobLog.info({ jobId: job.id, niche: job.data.niche }, "schedule job picked up");
+      const started = Date.now();
+      try {
+        await axios.post(`${env.API_URL}/pipeline/run`, {
+          niche: job.data.niche,
+          languageCode: job.data.languageCode,
+        });
+        jobLog.info(
+          { jobId: job.id, durationMs: Date.now() - started },
+          "schedule job triggered pipeline successfully"
+        );
+      } catch (err: any) {
+        jobLog.error(
+          { err: err.response?.data || err.message, jobId: job.id, durationMs: Date.now() - started },
+          "schedule job failed to trigger pipeline"
+        );
+        throw err;
+      }
+    },
+    { connection, concurrency: 1 }
+  );
+
+  scheduleWorker.on("ready", () => log.info({ role }, "scheduleQueue ready"));
+  scheduleWorker.on("failed", (job, err) => log.error({ jobId: job?.id, err: err.message }, "schedule job failed"));
+  scheduleWorker.on("error", (err) => log.error({ err }, "schedule worker error"));
+  workers.push(scheduleWorker);
+}
+
 if ((role === "all" || role === "enrichment") && env.ENABLE_ANALYTICS_CRON) {
   startAnalyticsSyncCron();
   log.info({ role }, "analytics scheduler started");

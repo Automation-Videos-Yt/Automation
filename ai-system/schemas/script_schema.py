@@ -17,6 +17,7 @@ class ScriptInput(BaseModel):
     target_duration_sec: int = Field(default=75, ge=10, le=180)
     language_code: str = Field(default="en", min_length=2, max_length=10)
     past_topics: list[PastTopicContext] = Field(default_factory=list)
+    feedback: list[str] = Field(default_factory=list)
 
 
 class ScriptOutput(BaseModel):

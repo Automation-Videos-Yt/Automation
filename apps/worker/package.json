@@ -11,6 +11,8 @@
     "prisma:generate": "prisma generate --schema=../api/prisma/schema.prisma"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "@prisma/client": "^5.22.0",
     "axios": "^1.7.9",
     "bullmq": "^5.34.0",

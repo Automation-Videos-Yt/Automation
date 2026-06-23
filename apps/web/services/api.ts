@@ -15,6 +15,16 @@ export type PipelineStage =
   | "DONE"
   | "FAILED";
 
+export type PipelineSchedule = {
+  id: string;
+  niche: string;
+  languageCode: string;
+  cronExpression: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PerformancePrediction = {
   id: string;
   runId: string;
@@ -398,25 +408,7 @@ export const api = {
     }).then<PipelineRun>(handle);
   },
 
-  createBatch(
-    niche: string,
-    count: number,
-    durationSec: number = 75,
-    languageCodes: string[] = ["en"],
-    features?: Partial<RunFeatureToggles>,
-  ) {
-    return fetch(`${API_URL}/pipeline/batch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        niche,
-        count,
-        durationSec,
-        languageCodes,
-        features,
-      }),
-    }).then<{ count: number; runs: PipelineRun[] }>(handle);
-  },
+
 
   getRun(id: string) {
     return fetch(`${API_URL}/pipeline/${id}`, {
@@ -428,6 +420,26 @@ export const api = {
     return fetch(`${API_URL}/pipeline`, { cache: "no-store" }).then<
       PipelineRun[]
     >(handle);
+  },
+
+  getSchedules() {
+    return fetch(`${API_URL}/schedules`, { cache: "no-store" }).then<
+      PipelineSchedule[]
+    >(handle);
+  },
+
+  createSchedule(niche: string, cronExpression: string, languageCode = "en") {
+    return fetch(`${API_URL}/schedules`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ niche, cronExpression, languageCode }),
+    }).then<PipelineSchedule>(handle);
+  },
+
+  deleteSchedule(id: string) {
+    return fetch(`${API_URL}/schedules/${id}`, {
+      method: "DELETE",
+    }).then<void>(handle);
   },
 
   listRunsPaged(opts?: { page?: number; pageSize?: number }) {
@@ -468,6 +480,12 @@ export const api = {
   },
 
   mediaUrl(storagePath: string) {
+    if (storagePath.startsWith("s3://")) {
+      const parts = storagePath.replace("s3://", "").split("/");
+      parts.shift(); // remove bucket
+      const key = parts.join("/");
+      return `${API_URL}/media/s3/${key}`;
+    }
     const rel = storagePath.replace(/^\/storage\/?/, "");
     return `${API_URL}/media/${rel}`;
   },

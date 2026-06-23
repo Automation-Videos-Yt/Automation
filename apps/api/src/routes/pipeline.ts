@@ -5,7 +5,6 @@ import {
   getRun,
   getRunLogs,
   listRuns,
-  postBatch,
   postRetry,
   postRun,
 } from "../controllers/pipeline.controller";
@@ -19,7 +18,6 @@ import { streamRunEvents } from "../controllers/events.controller";
 export const pipelineRouter = Router();
 
 pipelineRouter.post("/run", postRun);
-pipelineRouter.post("/batch", postBatch);
 pipelineRouter.get("/", listRuns);
 pipelineRouter.get("/:id", getRun);
 pipelineRouter.get("/:id/experiment", getRunExperiment);

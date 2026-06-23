@@ -32,6 +32,8 @@ services:
       REDIS_URL: redis://redis:6379
       AI_SERVICE_URL: http://ai:8000
       STORAGE_PATH: /storage
+      APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
       API_PORT: 4000
     volumes:
       - storage_data:/storage
@@ -53,6 +55,8 @@ services:
       REDIS_URL: redis://redis:6379
       AI_SERVICE_URL: http://ai:8000
       STORAGE_PATH: /storage
+      APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
       WORKER_ROLE: all
     volumes:
       - storage_data:/storage
@@ -79,6 +83,8 @@ services:
       REDIS_URL: redis://redis:6379
       AI_SERVICE_URL: http://ai:8000
       STORAGE_PATH: /storage
+      APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
       WORKER_ROLE: video
       ENABLE_ANALYTICS_CRON: "false"
     volumes:
@@ -103,6 +109,8 @@ services:
       REDIS_URL: redis://redis:6379
       AI_SERVICE_URL: http://ai:8000
       STORAGE_PATH: /storage
+      APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
       WORKER_ROLE: upload
       ENABLE_ANALYTICS_CRON: "false"
     volumes:
@@ -127,6 +135,8 @@ services:
       REDIS_URL: redis://redis:6379
       AI_SERVICE_URL: http://ai:8000
       STORAGE_PATH: /storage
+      APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
       WORKER_ROLE: enrichment
       ENABLE_ANALYTICS_CRON: "true"
     volumes:
@@ -159,6 +169,35 @@ services:
       - "3000:3000"
     depends_on:
       - api
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+      - api
+
+  pg-backup:
+    image: prodrigestivill/postgres-backup-s3:16
+    restart: unless-stopped
+    environment:
+      SCHEDULE: '@daily'
+      S3_REGION: ${AWS_REGION:-us-east-1}
+      S3_ENDPOINT: https://s3.${AWS_REGION:-us-east-1}.amazonaws.com
+      S3_BUCKET: ${BACKUP_S3_BUCKET}
+      S3_PREFIX: 'backup'
+      POSTGRES_HOST: postgres
+      POSTGRES_DATABASE: ${POSTGRES_DB:-youtube_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:

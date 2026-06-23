@@ -1,0 +1,28 @@
+name: CD Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI Build"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1 # Change to match your target region
+
+      - name: Execute deployment via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["cd /home/ubuntu", "if [ ! -d \"ai_automation_videos\" ]; then git clone https://github.com/${{ github.repository }}.git ai_automation_videos; fi", "cd ai_automation_videos", "git pull origin main", "export DOCKERHUB_NAMESPACE=ghcr.io/${{ github.repository_owner }}", "export IMAGE_TAG=latest", "docker compose -f docker-compose.prod.yml pull", "docker compose -f docker-compose.prod.yml up -d", "docker image prune -f"]' \
+            --comment "Deploy latest docker images"

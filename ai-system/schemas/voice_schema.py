@@ -14,8 +14,15 @@ class VoiceInput(BaseModel):
     tier: Literal["elite", "premium", "economy"] = "premium"
 
 
+class WordTimestamp(BaseModel):
+    word: str
+    start: float
+    end: float
+
+
 class VoiceOutput(BaseModel):
     audio_path: str
     duration_sec: float
     voice_id: str
     provider: str | None = None
+    word_timestamps: list[WordTimestamp] | None = None

@@ -17,3 +17,17 @@ storage/temp/*
 !storage/temp/.gitkeep
 *.log
 .DS_Store
+
+# Terraform
+.terraform
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Keys and Secrets
+*.pem
+*.key
+*.crt
+*.p8
+*.env.*

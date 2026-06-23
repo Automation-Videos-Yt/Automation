@@ -1,8 +1,10 @@
 import json
 from config import settings
 from schemas import HookInput, HookOutput
+from lib.prompt_registry import PromptVersion
 from lib.log import get_logger, timed
-from lib.llm import chat_with_fallback
+from lib.llm import chat
+from lib.model_router import TaskType
 
 log = get_logger("agent.hook")
 
@@ -111,25 +113,16 @@ def run(raw_input: dict) -> dict:
         f"Produce EXACTLY {payload.variants} distinct hook variants, score each, and choose the best."
     )
 
-    with timed(log, "openai.chat.completions", model=settings.openai_model_quality):
-        response = chat_with_fallback(
-            primary_model=settings.openai_model_quality,
-            fallback_model=settings.openai_model_fast,
+    with timed(log, "llm.chat", task="HOOK_GENERATION"):
+        response = chat(
+            task_type=TaskType.HOOK_GENERATION,
+            prompt_version=PromptVersion.HOOK_V1,
             temperature=0.9,
             response_format=_response_format(payload.variants),
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-        )
-
-    usage = getattr(response, "usage", None)
-    if usage:
-        log.info(
-            "tokens in=%s out=%s total=%s",
-            usage.prompt_tokens,
-            usage.completion_tokens,
-            usage.total_tokens,
         )
 
     data = json.loads(response.choices[0].message.content or "{}")

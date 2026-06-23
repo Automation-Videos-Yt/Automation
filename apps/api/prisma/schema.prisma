@@ -74,6 +74,7 @@ model PipelineRun {
   scenes       Scene[]
   video        Video?
   logs         AgentLog[]
+  costRecords  AiCostRecord[]
   upload       YouTubeUpload?
   analytics    VideoAnalytics[]
   feedback     FeedbackInsight?
@@ -176,6 +177,38 @@ model AgentLog {
   createdAt    DateTime       @default(now())
 
   @@index([runId, createdAt])
+}
+
+model AiCostRecord {
+  id            String      @id @default(cuid())
+  runId         String
+  run           PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  provider      String
+  model         String
+  operation     String
+  promptVersion String?
+  tokensInput  Int?
+  tokensOutput Int?
+  audioChars   Int?
+  audioSeconds Float?
+  costUsd      Float
+  latencyMs    Int?
+  createdAt    DateTime    @default(now())
+
+  @@index([runId])
+  @@index([provider, model])
+}
+
+model AiCache {
+  id        String   @id @default(cuid())
+  taskType  String
+  inputHash String
+  output    Json
+  provider  String
+  model     String
+  createdAt DateTime @default(now())
+
+  @@unique([taskType, inputHash])
 }
 
 // Singleton row (id = "default") that stores the refresh token for the linked YouTube channel.
@@ -282,4 +315,15 @@ model HookMemory {
   createdAt   DateTime @default(now())
 
   @@index([niche])
+}
+
+model PipelineSchedule {
+  id             String   @id @default(cuid())
+  niche          String
+  languageCode   String   @default("en")
+  cronExpression String
+  repeatJobKey   String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
