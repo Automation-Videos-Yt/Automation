@@ -3,7 +3,8 @@ import json
 from config import settings
 from schemas import EditorNotesInput, EditorNotesOutput
 from lib.log import get_logger, timed
-from lib.llm import chat_with_fallback
+from lib.llm import chat
+from lib.model_router import TaskType
 
 log = get_logger("agent.editor_notes")
 
@@ -137,10 +138,9 @@ def run(raw_input: dict) -> dict:
         f"Scenes (optional):\n{_scenes_block(payload)}\n"
     )
 
-    with timed(log, "openai.chat.completions", model=settings.openai_model_quality):
-        response = chat_with_fallback(
-            primary_model=settings.openai_model_quality,
-            fallback_model=settings.openai_model_fast,
+    with timed(log, "llm.chat", model=settings.openai_model_quality):
+        response = chat(
+            task_type=TaskType.ANALYSIS,
             temperature=0.7,
             response_format=RESPONSE_FORMAT,
             messages=[

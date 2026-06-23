@@ -2,7 +2,8 @@ import json
 from config import settings
 from schemas import ViralHookInput, ViralHookOutput, TopPerformingHook
 from lib.log import get_logger, timed
-from lib.llm import chat_with_fallback
+from lib.llm import chat
+from lib.model_router import TaskType
 
 log = get_logger("agent.viral_hook")
 
@@ -89,10 +90,9 @@ def run(raw_input: dict) -> list[str]:
         f"Top-performing hooks from memory:\n{_memory_hooks_block(payload)}"
     )
 
-    with timed(log, "openai.chat.completions", model=settings.openai_model_quality):
-        response = chat_with_fallback(
-            primary_model=settings.openai_model_quality,
-            fallback_model=settings.openai_model_fast,
+    with timed(log, "llm.chat", model=settings.openai_model_quality):
+        response = chat(
+            task_type=TaskType.GENERATION,
             temperature=0.9,
             response_format=RESPONSE_FORMAT,
             messages=[
