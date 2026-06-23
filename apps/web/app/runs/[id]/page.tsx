@@ -601,6 +601,7 @@ export default function RunDetailPage() {
                   {run.video.thumbnailPath ? (
                     <div className="space-y-1">
                       <div className="text-xs text-white/50">Thumbnail</div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={api.mediaUrl(run.video.thumbnailPath)}
                         alt="Thumbnail"
