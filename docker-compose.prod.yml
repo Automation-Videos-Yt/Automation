@@ -183,7 +183,7 @@ services:
       - api
 
   pg-backup:
-    image: prodrigestivill/postgres-backup-s3:16
+    image: eeshugerman/postgres-backup-s3:16
     restart: unless-stopped
     environment:
       SCHEDULE: '@daily'
