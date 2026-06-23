@@ -140,11 +140,17 @@ def run(raw_input: dict) -> dict:
             data["chosen_index"] = best_idx
         data["chosen_text"] = variants[data["chosen_index"]]["text"]
 
-    out = HookOutput.model_validate(data).model_dump()
+    mapped_data = {
+        "winning_hook": data.get("chosen_text", ""),
+        "hook_score": variants[data.get("chosen_index", 0)].get("score", 0.0) if variants else 0.0,
+        "generation_count": len(variants),
+    }
+
+    out = HookOutput.model_validate(mapped_data).model_dump()
     log.info(
         "chose idx=%d score=%.2f text=%r",
-        out["chosen_index"],
-        out["variants"][out["chosen_index"]]["score"],
-        out["chosen_text"][:80],
+        data.get("chosen_index", 0),
+        out["hook_score"],
+        out["winning_hook"][:80],
     )
     return out
