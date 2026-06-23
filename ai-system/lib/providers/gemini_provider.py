@@ -59,6 +59,20 @@ class GeminiProvider(BaseProvider):
         if not schema:
             return None
         
+        import copy
+        def clean_schema(d):
+            if isinstance(d, dict):
+                d.pop("additionalProperties", None)
+                d.pop("strict", None)
+                for k, v in d.items():
+                    clean_schema(v)
+            elif isinstance(d, list):
+                for item in d:
+                    clean_schema(item)
+            return d
+
+        schema = clean_schema(copy.deepcopy(schema))
+        
         # A simple recursive converter. The google-genai SDK accepts dicts that match the Schema structure,
         # but sometimes requires explicit types.Schema objects. The latest SDK allows passing the dict directly!
         return schema
