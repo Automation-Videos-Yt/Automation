@@ -128,26 +128,42 @@ def run(raw_input: dict) -> dict:
             voice_id = OPENAI_TTS_VOICE_DEFAULT
 
     elif tier == "premium":
-        with timed(log, "openai.tts", chars=chars, model=OPENAI_TTS_MODEL_PREMIUM):
-            bytes_written = _openai_tts(
-                OPENAI_TTS_MODEL_PREMIUM,
-                payload.text,
-                OPENAI_TTS_VOICE_DEFAULT,
-                payload.output_path,
-            )
-        provider_used = "openai-tts-1-hd"
-        voice_id = OPENAI_TTS_VOICE_DEFAULT
+        try:
+            with timed(log, "openai.tts", chars=chars, model=OPENAI_TTS_MODEL_PREMIUM):
+                bytes_written = _openai_tts(
+                    OPENAI_TTS_MODEL_PREMIUM,
+                    payload.text,
+                    OPENAI_TTS_VOICE_DEFAULT,
+                    payload.output_path,
+                )
+            provider_used = "openai-tts-1-hd"
+            voice_id = OPENAI_TTS_VOICE_DEFAULT
+        except Exception as e:
+            log.warning("openai tts failed (%s) — falling back to ElevenLabs", e)
+            with timed(log, "elevenlabs.tts.fallback", chars=chars, voice_id=voice_id):
+                bytes_written, word_timestamps = _elevenlabs_tts(
+                    payload.text, voice_id, payload.output_path
+                )
+            provider_used = "elevenlabs"
 
     else:  # economy
-        with timed(log, "openai.tts", chars=chars, model=OPENAI_TTS_MODEL_ECONOMY):
-            bytes_written = _openai_tts(
-                OPENAI_TTS_MODEL_ECONOMY,
-                payload.text,
-                OPENAI_TTS_VOICE_DEFAULT,
-                payload.output_path,
-            )
-        provider_used = "openai-tts-1"
-        voice_id = OPENAI_TTS_VOICE_DEFAULT
+        try:
+            with timed(log, "openai.tts", chars=chars, model=OPENAI_TTS_MODEL_ECONOMY):
+                bytes_written = _openai_tts(
+                    OPENAI_TTS_MODEL_ECONOMY,
+                    payload.text,
+                    OPENAI_TTS_VOICE_DEFAULT,
+                    payload.output_path,
+                )
+            provider_used = "openai-tts-1"
+            voice_id = OPENAI_TTS_VOICE_DEFAULT
+        except Exception as e:
+            log.warning("openai tts failed (%s) — falling back to ElevenLabs", e)
+            with timed(log, "elevenlabs.tts.fallback", chars=chars, voice_id=voice_id):
+                bytes_written, word_timestamps = _elevenlabs_tts(
+                    payload.text, voice_id, payload.output_path
+                )
+            provider_used = "elevenlabs"
 
     duration = float(MP3(payload.output_path).info.length)
     log.info(
