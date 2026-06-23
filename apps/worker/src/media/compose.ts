@@ -92,9 +92,13 @@ export async function composeFinalVideo(opts: ComposeOptions): Promise<void> {
 
   // --- Step 2: mux audio + subtitles ---
   const hasSubs = opts.subtitlePath && opts.subtitlePath.length > 0;
+  const isAss = opts.subtitlePath.endsWith(".ass");
+
   // Portrait tuning: bold boxed captions for stronger on-screen presence.
   const vf = hasSubs
-    ? `subtitles='${escapeForFilter(opts.subtitlePath)}':force_style='Fontname=DejaVu Sans,Fontsize=17,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BackColour=&H78000000,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=74,Spacing=0.6'`
+    ? isAss
+      ? `subtitles='${escapeForFilter(opts.subtitlePath)}'`
+      : `subtitles='${escapeForFilter(opts.subtitlePath)}':force_style='Fontname=DejaVu Sans,Fontsize=17,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BackColour=&H00000000,BorderStyle=1,Outline=2.5,Shadow=1,Alignment=2,MarginV=74,Spacing=0.6'`
     : null;
 
   const muxArgs = [

@@ -865,3 +865,72 @@ export async function generateSrtFromWords(opts: {
 
   await writeFile(opts.outputPath, lines.join("\n"), "utf-8");
 }
+
+/**
+ * Generate animated, colorful ASS subtitles (Hormozi-style).
+ */
+export async function generateAssFromWords(opts: {
+  words: WordSpan[];
+  outputPath: string;
+  transcriptText?: string;
+}): Promise<void> {
+  const words = normalizeWords(opts.words);
+  const segments = segmentWordTimestamps({
+    words,
+    transcriptText: opts.transcriptText,
+  });
+
+  const lines: string[] = [];
+  lines.push("[Script Info]");
+  lines.push("ScriptType: v4.00+");
+  lines.push("PlayResX: 1080");
+  lines.push("PlayResY: 1920");
+  lines.push("WrapStyle: 1");
+  lines.push("");
+  lines.push("[V4+ Styles]");
+  lines.push("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
+  lines.push("Style: Default,DejaVu Sans,85,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,0,0,1,5,2.5,2,40,40,280,1");
+  lines.push("");
+  lines.push("[Events]");
+  lines.push("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+
+  function formatAssTime(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const cs = Math.floor((seconds - Math.floor(seconds)) * 100);
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+  }
+
+  for (const seg of segments) {
+    const segWords = words.filter((w) => {
+      const mid = (w.start + w.end) / 2;
+      return mid >= seg.start - 0.05 && mid <= seg.end + 0.05;
+    });
+
+    if (segWords.length === 0) continue;
+
+    for (let i = 0; i < segWords.length; i++) {
+      const w = segWords[i];
+      const activeStart = i === 0 ? seg.start : w.start;
+      const activeEnd = i === segWords.length - 1 ? seg.end : segWords[i + 1].start;
+
+      let formattedText = "";
+      for (let j = 0; j < segWords.length; j++) {
+        const wordObj = segWords[j];
+        if (j === i) {
+          formattedText += `{\\c&H0000FFFF&}{\\fscx115\\fscy115}${wordObj.word}{\\r} `;
+        } else {
+          formattedText += `${wordObj.word} `;
+        }
+      }
+
+      lines.push(
+        `Dialogue: 0,${formatAssTime(activeStart)},${formatAssTime(activeEnd)},Default,,0,0,0,,${formattedText.trim()}`,
+      );
+    }
+  }
+
+  await writeFile(opts.outputPath, lines.join("\n"), "utf-8");
+}

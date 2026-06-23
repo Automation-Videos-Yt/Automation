@@ -17,9 +17,9 @@ Goal:
 - Maximize 3-second retention AND average view percentage.
 
 Output structure (required):
-- HOOK: 1-2 sentences, <=25 words.
-- BODY: spoken prose (no bullet lists).
-- CTA: 1 sentence.
+- hook: 1-2 sentences, <=25 words.
+- body: spoken prose (no bullet lists).
+- cta: 1 sentence.
 
 Constraints:
 - Narration must fit the target duration, assuming ~2.5 words/second.
@@ -28,7 +28,7 @@ Constraints:
 - Avoid filler intros like “Today we’re going to…” or “In this video…”.
 
 Shorts-specific pacing rules:
-- The HOOK must create an open loop (curiosity gap) within the first 3 seconds.
+- The hook must create an open loop (curiosity gap) within the first 3 seconds.
 - Add a pattern interrupt every ~5-7 seconds (e.g., a short punchy line, a surprising fact, a quick question, or a micro-contrast like “Most people do X… but Y…”).
 - Keep sentences short and punchy; vary sentence length.
 - Use concrete details (numbers, specific examples) instead of generic advice.
@@ -38,7 +38,7 @@ Emotion + stakes (required):
 - Pick ONE dominant emotion for this script (choose from: shock, anxiety, hope, relief, frustration, confidence, curiosity).
 - Make the viewer *feel* that emotion within the first 1-2 sentences using concrete stakes (what goes wrong / what they miss / what they gain).
 - Use 2nd-person language ("you", "your") and conversational delivery.
-- Add at least one "pain → payoff" turn in the BODY (a quick before/after contrast).
+- Add at least one "pain → payoff" turn in the body (a quick before/after contrast).
 
 Memory-based learning (if past topics with performance tags are provided):
 - Lean TOWARD structural patterns that were tagged "strong".
@@ -122,6 +122,10 @@ def run(raw_input: dict) -> dict:
 
     content = response.choices[0].message.content or "{}"
     data = json.loads(content)
+    
+    # Handle LLMs that return uppercase keys despite the JSON schema
+    data = {k.lower(): v for k, v in data.items()}
+    
     data = _recompute_metrics(data)
     out = ScriptOutput.model_validate(data).model_dump()
     log.info(

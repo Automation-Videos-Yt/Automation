@@ -7,7 +7,7 @@ import { pLimit } from "../lib/concurrency";
 import { downloadClip } from "../media/clipDownload";
 import { prepareSceneClip } from "../media/clipPrep";
 import { composeFinalVideo } from "../media/compose";
-import { generateSrtFromWords } from "../media/subtitles";
+import { generateAssFromWords } from "../media/subtitles";
 import { uploadFileToS3 } from "../lib/s3";
 import {
   completeStage,
@@ -137,8 +137,8 @@ export const videoStage: PipelineStage = {
       isEnglishLanguage(run.languageCode) &&
       timestamp.words.length > 0
     ) {
-      subtitlePath = path.join(tempDir, "subs.srt");
-      await generateSrtFromWords({
+      subtitlePath = path.join(tempDir, "subs.ass");
+      await generateAssFromWords({
         words: timestamp.words,
         outputPath: subtitlePath,
         transcriptText: narration,
