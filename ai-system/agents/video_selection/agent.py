@@ -217,18 +217,24 @@ def _generate_scene_plans(payload: VideoSelectionInput) -> dict[int, dict[str, A
         f"Segments:\n{scene_lines}"
     )
 
-    with timed(log, "openai.scene_intelligence", model=settings.openai_model_quality):
-        resp = client.chat.completions.create(
-            model=settings.openai_model_quality,
-            temperature=0.8,
-            response_format=_scene_plan_schema(len(payload.scenes)),
-            messages=[
-                {"role": "system", "content": SCENE_INTELLIGENCE_SYSTEM},
-                {"role": "user", "content": user_msg},
-            ],
-        )
+    from lib.llm import chat
+    from lib.model_router import TaskType
 
-    data = json.loads(resp.choices[0].message.content or "{}")
+    with timed(log, "llm.scene_intelligence", task="VIDEO_SELECTION"):
+        try:
+            resp = chat(
+                task_type=TaskType.VIDEO_SELECTION,
+                temperature=0.8,
+                response_format=_scene_plan_schema(len(payload.scenes)),
+                messages=[
+                    {"role": "system", "content": SCENE_INTELLIGENCE_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+        except Exception as e:
+            log.warning("scene_intelligence generation failed across all providers: %s, using dumb fallback for all scenes", e)
+            data = {}
     mapped: dict[int, dict[str, Any]] = {}
     for seg in data.get("segments", []):
         if not isinstance(seg, dict):

@@ -7,6 +7,7 @@ class TaskType(Enum):
     SCRIPT_EVALUATION = "script_evaluation"
     PERFORMANCE_PREDICTION = "performance_prediction"
     AUTOPILOT = "autopilot"
+    VIDEO_SELECTION = "video_selection"
     EMBEDDINGS = "embeddings"
     TTS_HD = "tts_hd"
     TTS_BUDGET = "tts_budget"
@@ -19,6 +20,7 @@ TASK_PROVIDERS = {
     TaskType.SCRIPT_EVALUATION: ["gemini", "groq", "openrouter", "openai"],
     TaskType.PERFORMANCE_PREDICTION: ["gemini", "groq", "openrouter", "openai"],
     TaskType.AUTOPILOT: ["gemini", "groq", "openrouter", "openai"],
+    TaskType.VIDEO_SELECTION: ["gemini", "groq", "openrouter", "openai"],
     TaskType.EMBEDDINGS: ["openai"],
     TaskType.TTS_HD: ["openai"],
     TaskType.TTS_BUDGET: ["openai"]
@@ -32,6 +34,7 @@ PROVIDER_MODELS = {
         TaskType.SCRIPT_EVALUATION: "gemini-2.5-flash",
         TaskType.PERFORMANCE_PREDICTION: "gemini-2.5-flash",
         TaskType.AUTOPILOT: "gemini-2.5-flash",
+        TaskType.VIDEO_SELECTION: "gemini-2.5-flash",
     },
     "groq": {
         TaskType.TOPIC_GENERATION: "llama-3.1-8b-instant",
@@ -40,6 +43,7 @@ PROVIDER_MODELS = {
         TaskType.SCRIPT_EVALUATION: "llama-3.1-8b-instant",
         TaskType.PERFORMANCE_PREDICTION: "llama-3.1-8b-instant",
         TaskType.AUTOPILOT: "llama-3.1-8b-instant",
+        TaskType.VIDEO_SELECTION: "llama-3.3-70b-versatile",
     },
     "openrouter": {
         TaskType.TOPIC_GENERATION: "meta-llama/llama-3.3-70b-instruct:free",
@@ -48,6 +52,7 @@ PROVIDER_MODELS = {
         TaskType.SCRIPT_EVALUATION: "meta-llama/llama-3.3-70b-instruct:free",
         TaskType.PERFORMANCE_PREDICTION: "meta-llama/llama-3.3-70b-instruct:free",
         TaskType.AUTOPILOT: "meta-llama/llama-3.3-70b-instruct:free",
+        TaskType.VIDEO_SELECTION: "meta-llama/llama-3.3-70b-instruct:free",
     },
     "openai": {
         TaskType.TOPIC_GENERATION: "gpt-4o-mini",
@@ -56,6 +61,7 @@ PROVIDER_MODELS = {
         TaskType.SCRIPT_EVALUATION: "gpt-4o-mini",
         TaskType.PERFORMANCE_PREDICTION: "gpt-4o-mini",
         TaskType.AUTOPILOT: "gpt-4o-mini",
+        TaskType.VIDEO_SELECTION: "gpt-4o-mini",
         TaskType.EMBEDDINGS: "text-embedding-3-small",
         TaskType.TTS_HD: "tts-1-hd",
         TaskType.TTS_BUDGET: "tts-1"
