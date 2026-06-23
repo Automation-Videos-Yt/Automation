@@ -14,6 +14,7 @@ from agents.prediction import run as prediction_run
 from agents.viral_hook import run as viral_hook_run
 from agents.retention_optimizer import run as retention_optimizer_run
 from agents.editor_notes import run as editor_notes_run
+from agents.script_eval import run as script_eval_run
 from lib.log import get_logger
 
 log = get_logger("orchestrator")
@@ -24,6 +25,7 @@ AgentFn = Callable[[dict], object]
 REGISTRY: dict[str, AgentFn] = {
     "topic": topic_run,
     "script": script_run,
+    "script_eval": script_eval_run,
     "hook": hook_run,
     "voice": voice_run,
     "timestamp": timestamp_run,
