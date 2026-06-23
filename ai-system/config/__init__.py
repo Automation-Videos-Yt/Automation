@@ -7,6 +7,8 @@ load_dotenv()
 class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     openai_model_fast: str = os.getenv("OPENAI_MODEL_FAST", "gpt-4o-mini")
     openai_model_quality: str = os.getenv("OPENAI_MODEL_QUALITY", "gpt-4o")
     elevenlabs_api_key: str = os.getenv("ELEVENLABS_API_KEY", "")

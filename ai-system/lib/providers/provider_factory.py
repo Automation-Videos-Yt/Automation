@@ -12,6 +12,12 @@ class ProviderFactory:
                 cls._providers[name] = OpenAIProvider()
             elif name == "gemini":
                 cls._providers[name] = GeminiProvider()
+            elif name == "groq":
+                from .groq_provider import GroqProvider
+                cls._providers[name] = GroqProvider()
+            elif name == "openrouter":
+                from .openrouter_provider import OpenRouterProvider
+                cls._providers[name] = OpenRouterProvider()
             else:
                 raise ValueError(f"Unknown provider: {name}")
         return cls._providers[name]

@@ -13,12 +13,12 @@ class TaskType(Enum):
 
 # Default provider fallback chains per task
 TASK_PROVIDERS = {
-    TaskType.TOPIC_GENERATION: ["gemini", "openai"],
-    TaskType.HOOK_GENERATION: ["gemini", "openai"],
-    TaskType.SCRIPT_WRITING: ["openai"], # deterministic, no fallback to gemini
-    TaskType.SCRIPT_EVALUATION: ["gemini", "openai"],
-    TaskType.PERFORMANCE_PREDICTION: ["gemini", "openai"],
-    TaskType.AUTOPILOT: ["gemini", "openai"],
+    TaskType.TOPIC_GENERATION: ["gemini", "groq", "openrouter", "openai"],
+    TaskType.HOOK_GENERATION: ["gemini", "groq", "openrouter", "openai"],
+    TaskType.SCRIPT_WRITING: ["gemini", "groq", "openrouter", "openai"], # fallback to gemini if openai fails
+    TaskType.SCRIPT_EVALUATION: ["gemini", "groq", "openrouter", "openai"],
+    TaskType.PERFORMANCE_PREDICTION: ["gemini", "groq", "openrouter", "openai"],
+    TaskType.AUTOPILOT: ["gemini", "groq", "openrouter", "openai"],
     TaskType.EMBEDDINGS: ["openai"],
     TaskType.TTS_HD: ["openai"],
     TaskType.TTS_BUDGET: ["openai"]
@@ -32,6 +32,22 @@ PROVIDER_MODELS = {
         TaskType.SCRIPT_EVALUATION: "gemini-2.5-flash",
         TaskType.PERFORMANCE_PREDICTION: "gemini-2.5-flash",
         TaskType.AUTOPILOT: "gemini-2.5-flash",
+    },
+    "groq": {
+        TaskType.TOPIC_GENERATION: "llama3-8b-8192",
+        TaskType.HOOK_GENERATION: "llama3-8b-8192",
+        TaskType.SCRIPT_WRITING: "llama3-70b-8192", 
+        TaskType.SCRIPT_EVALUATION: "llama3-8b-8192",
+        TaskType.PERFORMANCE_PREDICTION: "llama3-8b-8192",
+        TaskType.AUTOPILOT: "llama3-8b-8192",
+    },
+    "openrouter": {
+        TaskType.TOPIC_GENERATION: "meta-llama/llama-3-8b-instruct:free",
+        TaskType.HOOK_GENERATION: "meta-llama/llama-3-8b-instruct:free",
+        TaskType.SCRIPT_WRITING: "meta-llama/llama-3-8b-instruct:free", 
+        TaskType.SCRIPT_EVALUATION: "meta-llama/llama-3-8b-instruct:free",
+        TaskType.PERFORMANCE_PREDICTION: "meta-llama/llama-3-8b-instruct:free",
+        TaskType.AUTOPILOT: "meta-llama/llama-3-8b-instruct:free",
     },
     "openai": {
         TaskType.TOPIC_GENERATION: "gpt-4o-mini",
