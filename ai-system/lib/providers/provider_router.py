@@ -24,7 +24,13 @@ class ProviderRouter:
         
         last_err = None
         for provider_name in [primary_provider_name] + fallback_provider_names:
-            provider = ProviderFactory.get_provider(provider_name)
+            try:
+                provider = ProviderFactory.get_provider(provider_name)
+            except Exception as e:
+                log.warning("provider=%s failed to initialize: %s", provider_name, str(e))
+                last_err = e
+                health_monitor.record_result(provider=provider_name, success=False, latency_ms=0)
+                continue
             
             # Within the same provider, we might have a primary model and a fallback model (e.g. gpt-4o -> gpt-4o-mini)
             primary_model = get_model_for_provider(provider_name, task_type)
