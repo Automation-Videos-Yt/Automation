@@ -1,7 +1,0 @@
-ALTER TABLE "PipelineRun"
-ADD COLUMN IF NOT EXISTS "startedAt" TIMESTAMP(3),
-ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMP(3),
-ADD COLUMN IF NOT EXISTS "failedStage" "PipelineStage",
-ADD COLUMN IF NOT EXISTS "stageFailureReason" TEXT,
-ADD COLUMN IF NOT EXISTS "stageFailureMeta" JSONB,
-ADD COLUMN IF NOT EXISTS "stageRetryCounts" JSONB;
