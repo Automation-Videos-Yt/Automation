@@ -97,6 +97,7 @@ def run(raw_input: dict) -> dict:
             prompt_version=PromptVersion.TOPIC_V1,
             temperature=0.9,
             response_format=RESPONSE_FORMAT,
+            response_model=TopicOutput,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},

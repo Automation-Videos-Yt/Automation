@@ -18,6 +18,7 @@ def chat(
     messages: list[dict],
     response_format: dict | None = None,
     temperature: float = 0.7,
+    response_model=None,
 ):
     """
     Facade for all agent chat completions.
@@ -30,6 +31,14 @@ def chat(
     
     # Cache Check
     cached_output = ai_cache.get(task_type.value, input_hash)
+    if cached_output:
+        if response_model:
+            try:
+                response_model.model_validate(cached_output)
+            except Exception as e:
+                log.warning("Ignoring invalid cached output for task=%s hash=%s: %s", task_type.value, input_hash, e)
+                cached_output = None
+
     if cached_output:
         log.info("cache hit task=%s hash=%s", task_type.value, input_hash)
         
@@ -74,6 +83,9 @@ def chat(
     content = response.choices[0].message.content
     try:
         data = json.loads(content)
+        if response_model:
+            response_model.model_validate(data) # Only cache if it passes validation
+        
         ai_cache.set(
             task_type=task_type.value,
             input_hash=input_hash,
@@ -83,5 +95,7 @@ def chat(
         )
     except json.JSONDecodeError:
         log.warning("could not cache response because it is not valid JSON")
+    except Exception as e:
+        log.warning("could not cache response due to validation error: %s", e)
         
     return response
