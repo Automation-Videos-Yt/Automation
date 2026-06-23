@@ -22,9 +22,9 @@ export type CachedScript = {
 };
 
 export type CachedHook = {
-  variants: { text: string; score: number; reasoning: string }[];
-  chosen_index: number;
-  chosen_text: string;
+  winning_hook: string;
+  hook_score: number;
+  generation_count: number;
 };
 
 export type CachedPrediction = {
@@ -105,23 +105,15 @@ export async function loadScript(runId: string): Promise<CachedScript | null> {
 }
 
 export async function loadHook(runId: string): Promise<CachedHook | null> {
-  const rows = await prisma.hookVariant.findMany({
-    where: { runId },
-    orderBy: { index: "asc" },
+  const log_row = await prisma.agentLog.findFirst({
+    where: { runId, agent: "hook", status: "SUCCESS" },
+    orderBy: { createdAt: "desc" },
   });
-  if (rows.length === 0) return null;
-  const chosenIdx = rows.findIndex((r) => r.chosen);
-  const chosen = chosenIdx >= 0 ? chosenIdx : 0;
-  log.info({ runId, variants: rows.length, chosen }, "hook cache HIT");
-  return {
-    variants: rows.map((r) => ({
-      text: r.text,
-      score: r.score,
-      reasoning: r.reasoning ?? "",
-    })),
-    chosen_index: chosen,
-    chosen_text: rows[chosen].text,
-  };
+  if (!log_row?.outputJson) return null;
+  const json = log_row.outputJson as unknown as CachedHook;
+  if (!json?.winning_hook) return null;
+  log.info({ runId, score: json.hook_score }, "hook cache HIT");
+  return json;
 }
 
 export async function loadPrediction(

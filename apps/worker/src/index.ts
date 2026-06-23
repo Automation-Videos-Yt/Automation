@@ -160,7 +160,7 @@ if (shouldRunEnrichment) {
 // ------------------------------------------------------------
 // Scheduled jobs (Cron runners via BullMQ)
 // ------------------------------------------------------------
-if (shouldRunVideo || role === "all") {
+if (shouldRunVideo) {
   const scheduleWorker = new Worker<{ scheduleId: string; niche: string; languageCode: string }>(
     "scheduleQueue",
     async (job) => {

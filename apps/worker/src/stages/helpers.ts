@@ -235,7 +235,7 @@ export async function getHook(context: StageContext): Promise<HookOutput> {
 
   context.cache.hook = cached;
   const script = await getScript(context);
-  context.cache.script = { ...script, hook: cached.chosen_text };
+  context.cache.script = { ...script, hook: cached.winning_hook };
   return cached;
 }
 
