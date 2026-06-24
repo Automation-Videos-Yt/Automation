@@ -204,6 +204,40 @@ services:
       postgres:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infrastructure/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
   watchtower:
     image: containrrr/watchtower
     volumes:
@@ -216,3 +250,5 @@ volumes:
   storage_data:
   caddy_data:
   caddy_config:
+  prometheus_data:
+  grafana_data:
