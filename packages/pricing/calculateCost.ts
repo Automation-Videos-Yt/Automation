@@ -1,5 +1,5 @@
-import { PRICING_RATES, PRICING_VERSION } from "./constants";
-import { VideoOptions, CostSnapshot } from "./types";
+import { PRICING_RATES, PRICING_VERSION } from "./constants.js";
+import { VideoOptions, CostSnapshot } from "./types.js";
 
 export function calculateRunCost(options: VideoOptions): CostSnapshot {
   let durationCost = 0;
