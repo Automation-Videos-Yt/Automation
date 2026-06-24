@@ -12,6 +12,7 @@ class TaskType(Enum):
     EMBEDDINGS = "embeddings"
     TTS_HD = "tts_hd"
     TTS_BUDGET = "tts_budget"
+    ANALYSIS = "analysis"
 
 # Default provider fallback chains per task
 TASK_PROVIDERS = {
@@ -25,7 +26,8 @@ TASK_PROVIDERS = {
     TaskType.VIDEO_META: ["gemini", "groq", "openrouter", "openai"],
     TaskType.EMBEDDINGS: ["openai"],
     TaskType.TTS_HD: ["openai"],
-    TaskType.TTS_BUDGET: ["openai"]
+    TaskType.TTS_BUDGET: ["openai"],
+    TaskType.ANALYSIS: ["gemini", "groq", "openrouter", "openai"]
 }
 
 PROVIDER_MODELS = {
@@ -38,6 +40,7 @@ PROVIDER_MODELS = {
         TaskType.AUTOPILOT: "gemini-2.5-flash",
         TaskType.VIDEO_SELECTION: "gemini-2.5-flash",
         TaskType.VIDEO_META: "gemini-2.5-flash",
+        TaskType.ANALYSIS: "gemini-2.5-flash",
     },
     "groq": {
         TaskType.TOPIC_GENERATION: "llama-3.1-8b-instant",
@@ -48,6 +51,7 @@ PROVIDER_MODELS = {
         TaskType.AUTOPILOT: "llama-3.1-8b-instant",
         TaskType.VIDEO_SELECTION: "llama-3.3-70b-versatile",
         TaskType.VIDEO_META: "llama-3.1-8b-instant",
+        TaskType.ANALYSIS: "llama-3.1-8b-instant",
     },
     "openrouter": {
         TaskType.TOPIC_GENERATION: "meta-llama/llama-3.3-70b-instruct:free",
@@ -58,6 +62,7 @@ PROVIDER_MODELS = {
         TaskType.AUTOPILOT: "meta-llama/llama-3.3-70b-instruct:free",
         TaskType.VIDEO_SELECTION: "meta-llama/llama-3.3-70b-instruct:free",
         TaskType.VIDEO_META: "meta-llama/llama-3.3-70b-instruct:free",
+        TaskType.ANALYSIS: "meta-llama/llama-3.3-70b-instruct:free",
     },
     "openai": {
         TaskType.TOPIC_GENERATION: "gpt-4o-mini",
@@ -70,7 +75,8 @@ PROVIDER_MODELS = {
         TaskType.VIDEO_META: "gpt-4o-mini",
         TaskType.EMBEDDINGS: "text-embedding-3-small",
         TaskType.TTS_HD: "tts-1-hd",
-        TaskType.TTS_BUDGET: "tts-1"
+        TaskType.TTS_BUDGET: "tts-1",
+        TaskType.ANALYSIS: "gpt-4o-mini"
     }
 }
 
