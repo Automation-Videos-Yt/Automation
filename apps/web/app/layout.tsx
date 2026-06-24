@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Providers } from "./providers";
 import Link from "next/link";
-import { YouTubeBadge } from "../components/YouTubeBadge";
+import { HeaderActions } from "../components/HeaderActions";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -32,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Analytics
               </Link>
               <div className="ml-auto">
-                <YouTubeBadge />
+                <HeaderActions />
               </div>
             </nav>
           </header>
