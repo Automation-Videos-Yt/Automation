@@ -11,7 +11,7 @@ export default function PaymentCancelPage() {
         </div>
         <h2 className="text-2xl font-bold mb-4 text-gray-800">Payment Cancelled</h2>
         <p className="text-gray-600 mb-8">
-          Your payment was cancelled and you haven't been charged.
+          Your payment was cancelled and you haven&apos;t been charged.
         </p>
         <Link href="/pricing" className="inline-block bg-blue-600 text-white px-6 py-2 rounded font-semibold hover:bg-blue-700 transition-colors">
           Return to Pricing
