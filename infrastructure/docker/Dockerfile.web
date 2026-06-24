@@ -6,10 +6,12 @@ COPY package.json package-lock.json* ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY packages/pricing/package.json packages/pricing/package.json
 
 RUN npm install
 
 COPY apps/web apps/web
+COPY packages/pricing packages/pricing
 
 WORKDIR /app/apps/web
 RUN npm run build
@@ -24,6 +26,7 @@ COPY package.json package-lock.json* ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY packages/pricing/package.json packages/pricing/package.json
 
 # Install only production dependencies
 RUN npm install --workspace=@youtube-automation/web --omit=dev --include-workspace-root
@@ -32,6 +35,7 @@ RUN npm install --workspace=@youtube-automation/web --omit=dev --include-workspa
 COPY --from=builder /app/apps/web/.next ./apps/web/.next
 COPY --from=builder /app/apps/web/next.config.mjs ./apps/web/next.config.mjs
 COPY --from=builder /app/apps/web/package.json ./apps/web/package.json
+COPY --from=builder /app/packages/pricing ./packages/pricing
 
 WORKDIR /app/apps/web
 

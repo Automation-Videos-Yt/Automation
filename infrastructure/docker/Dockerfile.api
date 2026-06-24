@@ -10,11 +10,13 @@ COPY package.json package-lock.json* ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY packages/pricing/package.json packages/pricing/package.json
 
 RUN npm install
 
 # Source
 COPY apps/api apps/api
+COPY packages/pricing packages/pricing
 
 WORKDIR /app/apps/api
 RUN npx prisma generate
@@ -32,6 +34,7 @@ COPY package.json package-lock.json* ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY apps/web/package.json apps/web/package.json
+COPY packages/pricing/package.json packages/pricing/package.json
 
 # Install only production dependencies
 RUN npm install --workspace=@youtube-automation/api --omit=dev --include-workspace-root
@@ -39,6 +42,7 @@ RUN npm install --workspace=@youtube-automation/api --omit=dev --include-workspa
 # Copy compiled source and prisma client from builder
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /app/packages/pricing ./packages/pricing
 
 WORKDIR /app/apps/api
 RUN npx prisma generate
