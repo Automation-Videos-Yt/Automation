@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../utils/jwt";
-import { prisma } from "../db/client";
+import { prisma } from "../db/prisma";
 
 // Extend express Request to include user
 declare global {

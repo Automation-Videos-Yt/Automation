@@ -2,7 +2,7 @@ import { Router } from "express";
 import Stripe from "stripe";
 import { env } from "../config/env";
 import { requireAuth } from "../middleware/auth";
-import { prisma } from "../db/client";
+import { prisma } from "../db/prisma";
 import { logger } from "../lib/logger";
 import express from "express";
 
@@ -115,7 +115,7 @@ stripeRouter.post("/webhook", express.raw({ type: "application/json" }), async (
            data: {
               stripeSubscriptionId: subscription.id,
               stripePriceId: subscription.items.data[0].price.id,
-              stripeCurrentPeriodEnd: new Date(subscription.current_period_end * 1000)
+              stripeCurrentPeriodEnd: new Date((subscription as any).current_period_end * 1000)
            }
         });
         break;

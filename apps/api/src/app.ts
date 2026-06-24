@@ -12,6 +12,7 @@ import { costRouter } from "./routes/cost";
 import { authRouter } from "./routes/auth";
 import { stripeRouter } from "./routes/stripe";
 import { razorpayRouter } from "./routes/razorpay";
+import { scheduleRouter } from "./routes/schedule";
 import { errorHandler } from "./middleware/error";
 import { logger } from "./lib/logger";
 import { getPresignedS3Url } from "./lib/s3";

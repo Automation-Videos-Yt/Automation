@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "../db/client";
+import { prisma } from "../db/prisma";
 import { sendOtpEmail } from "../utils/mailer";
 import { signToken } from "../utils/jwt";
 import { requireAuth } from "../middleware/auth";

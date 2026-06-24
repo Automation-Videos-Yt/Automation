@@ -3,7 +3,7 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import { env } from "../config/env";
 import { requireAuth } from "../middleware/auth";
-import { prisma } from "../db/client";
+import { prisma } from "../db/prisma";
 import { logger } from "../lib/logger";
 
 export const razorpayRouter = Router();
@@ -85,7 +85,7 @@ razorpayRouter.post("/verify-payment", requireAuth, async (req, res) => {
   try {
     const creditsToGrant = 100; // In a full implementation, pass the packageId via frontend
     
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       const existing = await tx.payment.findUnique({
         where: { providerPaymentId: razorpay_order_id }
       });
@@ -156,7 +156,7 @@ razorpayRouter.post("/webhook", async (req, res) => {
         const packageId = order.notes?.packageId;
         
         if (userId) {
-          await prisma.$transaction(async (tx) => {
+          await prisma.$transaction(async (tx: any) => {
              // Check idempotency via Payment ledger
              const existing = await tx.payment.findUnique({
                where: { providerPaymentId: order.id }

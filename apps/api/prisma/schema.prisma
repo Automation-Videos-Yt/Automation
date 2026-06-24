@@ -379,15 +379,15 @@ model Otp {
 }
 
 model CreditPackage {
-  id              String   @id @default(cuid())
-  name            String
-  credits         Int
-  priceInr        Int
-  priceUsd        Int?
-  stripePriceId   String?
-  razorpayPlanId  String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  name           String
+  credits        Int
+  priceInr       Int
+  priceUsd       Int?
+  stripePriceId  String?
+  razorpayPlanId String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
 }
 
 model CreditTransaction {
