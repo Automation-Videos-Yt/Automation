@@ -35,6 +35,8 @@ services:
       APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
       AWS_REGION: ${AWS_REGION:-ap-south-1}
       API_PORT: 4000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: automation-api
     volumes:
       - storage_data:/storage
     ports:
@@ -58,6 +60,8 @@ services:
       APP_S3_BUCKET: ${APPLICATION_S3_BUCKET}
       AWS_REGION: ${AWS_REGION:-ap-south-1}
       WORKER_ROLE: all
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: automation-worker
     volumes:
       - storage_data:/storage
     depends_on:
