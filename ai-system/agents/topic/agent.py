@@ -98,6 +98,7 @@ def run(raw_input: dict) -> dict:
             temperature=0.9,
             response_format=RESPONSE_FORMAT,
             response_model=TopicOutput,
+            use_cache=payload.use_cache,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},

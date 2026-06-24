@@ -119,6 +119,7 @@ def run(raw_input: dict) -> dict:
             prompt_version=PromptVersion.HOOK_V1,
             temperature=0.9,
             response_format=_response_format(payload.variants),
+            use_cache=payload.use_cache,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},

@@ -87,6 +87,7 @@ def run(raw_input: dict) -> dict:
                 task_type=TaskType.VIDEO_META,
                 temperature=0.7,
                 response_format=RESPONSE_FORMAT,
+                use_cache=payload.use_cache,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},

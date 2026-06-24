@@ -66,6 +66,7 @@ export const videoStage: PipelineStage = {
       angle: topic.angle,
       script_body: script.body,
       language_code: run.languageCode,
+      use_cache: false,
     };
 
     const cachedMeta = await loadVideoMeta(context.runId);

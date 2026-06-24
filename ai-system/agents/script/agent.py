@@ -114,6 +114,7 @@ def run(raw_input: dict) -> dict:
             prompt_version=PromptVersion.SCRIPT_V4,
             temperature=0.8,
             response_format=RESPONSE_FORMAT,
+            use_cache=payload.use_cache,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},

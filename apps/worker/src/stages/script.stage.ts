@@ -43,6 +43,7 @@ export const scriptStage: PipelineStage = {
         language_code: run.languageCode,
         past_topics: pastTopics,
         feedback: currentFeedback,
+        use_cache: false,
       };
 
       const agentName = attempt === 0 ? AGENT : `${AGENT}_retry_${attempt}`;

@@ -19,6 +19,7 @@ def chat(
     response_format: dict | None = None,
     temperature: float = 0.7,
     response_model=None,
+    use_cache: bool = True,
 ):
     """
     Facade for all agent chat completions.
@@ -30,14 +31,16 @@ def chat(
     input_hash = generate_hash(messages)
     
     # Cache Check
-    cached_output = ai_cache.get(task_type.value, input_hash)
-    if cached_output:
-        if response_model:
-            try:
-                response_model.model_validate(cached_output)
-            except Exception as e:
-                log.warning("Ignoring invalid cached output for task=%s hash=%s: %s", task_type.value, input_hash, e)
-                cached_output = None
+    cached_output = None
+    if use_cache:
+        cached_output = ai_cache.get(task_type.value, input_hash)
+        if cached_output:
+            if response_model:
+                try:
+                    response_model.model_validate(cached_output)
+                except Exception as e:
+                    log.warning("Ignoring invalid cached output for task=%s hash=%s: %s", task_type.value, input_hash, e)
+                    cached_output = None
 
     if cached_output:
         log.info("cache hit task=%s hash=%s", task_type.value, input_hash)
@@ -86,13 +89,14 @@ def chat(
         if response_model:
             response_model.model_validate(data) # Only cache if it passes validation
         
-        ai_cache.set(
-            task_type=task_type.value,
-            input_hash=input_hash,
-            output=data,
-            provider=stats.get("model", ""), # rough heuristic
-            model=stats.get("model", "")
-        )
+        if use_cache:
+            ai_cache.set(
+                task_type=task_type.value,
+                input_hash=input_hash,
+                output=data,
+                provider=stats.get("model", ""), # rough heuristic
+                model=stats.get("model", "")
+            )
     except json.JSONDecodeError:
         log.warning("could not cache response because it is not valid JSON")
     except Exception as e:

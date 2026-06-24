@@ -16,6 +16,7 @@ class TopicInput(BaseModel):
     past_topics: list[PastTopicContext] = Field(default_factory=list)
     # Titles the agent must NOT produce (used for duplicate-topic retry).
     exclude_titles: list[str] = Field(default_factory=list)
+    use_cache: bool = Field(default=True)
 
 
 class TopicOutput(BaseModel):

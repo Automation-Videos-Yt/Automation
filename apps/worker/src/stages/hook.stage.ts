@@ -39,6 +39,7 @@ export const hookStage: PipelineStage = {
         language_code: run.languageCode,
         variants: env.HOOK_AB_VARIANTS ?? 20,
         past_hooks: pastHooks,
+        use_cache: false,
       };
 
       const generatedHook = await withAgentLog(context.prisma, context.runId, AGENT, hookInput, () =>

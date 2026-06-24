@@ -18,6 +18,7 @@ class ScriptInput(BaseModel):
     language_code: str = Field(default="en", min_length=2, max_length=10)
     past_topics: list[PastTopicContext] = Field(default_factory=list)
     feedback: list[str] = Field(default_factory=list)
+    use_cache: bool = Field(default=True)
 
 
 class ScriptOutput(BaseModel):

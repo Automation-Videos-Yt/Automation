@@ -40,6 +40,7 @@ export const topicStage: PipelineStage = {
         language_code: run.languageCode,
         past_topics: pastTopics,
         exclude_titles: excludeTitles,
+        use_cache: false,
       };
 
       topic = await withAgentLog(context.prisma, context.runId, excludeTitles.length > 0 ? `topic.retry${attempt - 1}` : AGENT, topicInput, () =>
