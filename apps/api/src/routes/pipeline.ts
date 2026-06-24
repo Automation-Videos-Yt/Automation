@@ -14,10 +14,11 @@ import {
   postSyncRun,
 } from "../controllers/analytics.controller";
 import { streamRunEvents } from "../controllers/events.controller";
+import { requireAuth } from "../middleware/auth";
 
 export const pipelineRouter = Router();
 
-pipelineRouter.post("/run", postRun);
+pipelineRouter.post("/run", requireAuth, postRun);
 pipelineRouter.get("/", listRuns);
 pipelineRouter.get("/:id", getRun);
 pipelineRouter.get("/:id/experiment", getRunExperiment);

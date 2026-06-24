@@ -1,0 +1,9 @@
+export const PRICING_RATES = {
+  BASE_VIDEO: 10,
+  DURATION_15S: 3,
+  NON_ENGLISH: 3,
+  THUMBNAIL: 2,
+  SUBTITLES: 5,
+};
+
+export const PRICING_VERSION = 1;

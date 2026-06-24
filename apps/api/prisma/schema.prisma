@@ -48,14 +48,39 @@ enum UploadPrivacy {
   PUBLIC
 }
 
+enum TransactionType {
+  PURCHASE
+  VIDEO_GENERATION
+  REFUND
+  ADMIN
+}
+
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
 model PipelineRun {
   id                 String         @id @default(cuid())
+  userId             String?
+  user               User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
   experimentId       String?
   niche              String
   languageCode       String         @default("en")
   targetDurationSec  Int            @default(75)
   stage              PipelineStage  @default(QUEUED)
   status             RunStatus      @default(QUEUED)
+  creditsCharged     Int?
+  creditsRefunded    Int?
+  refundReason       String?
+  pricingSnapshot    Json?
+  refundProcessed    Boolean        @default(false)
   currentAgent       String?
   errorMessage       String?
   startedAt          DateTime?
@@ -326,4 +351,64 @@ model PipelineSchedule {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model User {
+  id                     String        @id @default(cuid())
+  email                  String        @unique
+  isVerified             Boolean       @default(false)
+  stripeCustomerId       String?       @unique
+  stripeSubscriptionId   String?       @unique
+  stripePriceId          String?
+  stripeCurrentPeriodEnd DateTime?
+  razorpayCustomerId     String?       @unique
+  credits                Int           @default(50)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  runs                   PipelineRun[]
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, code])
+}
+
+model CreditPackage {
+  id              String   @id @default(cuid())
+  name            String
+  credits         Int
+  priceInr        Int
+  priceUsd        Int?
+  stripePriceId   String?
+  razorpayPlanId  String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+}
+
+model CreditTransaction {
+  id           String          @id @default(cuid())
+  userId       String
+  amount       Int
+  balanceAfter Int
+  type         TransactionType
+  referenceId  String?
+  metadata     Json?
+  createdAt    DateTime        @default(now())
+}
+
+model Payment {
+  id                String          @id @default(cuid())
+  userId            String
+  provider          PaymentProvider
+  providerPaymentId String          @unique
+  amount            Int
+  currency          String
+  status            PaymentStatus
+  creditsGranted    Int
+  createdAt         DateTime        @default(now())
 }

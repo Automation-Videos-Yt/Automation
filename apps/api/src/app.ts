@@ -1,13 +1,17 @@
 import "express-async-errors";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import pinoHttp from "pino-http";
 import { env } from "./config/env";
 import { pipelineRouter } from "./routes/pipeline";
 import { youtubeRouter } from "./routes/youtube";
 import { analyticsRouter } from "./routes/analytics";
 import { costRouter } from "./routes/cost";
-import { scheduleRouter } from "./routes/schedule";
+import { authRouter } from "./routes/auth";
+import { stripeRouter } from "./routes/stripe";
+import { razorpayRouter } from "./routes/razorpay";
 import { errorHandler } from "./middleware/error";
 import { logger } from "./lib/logger";
 import { getPresignedS3Url } from "./lib/s3";
@@ -45,7 +49,33 @@ export function createApp() {
     }),
   );
 
-  app.use(cors());
+  // Security headers
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow serving images/videos to frontend
+  }));
+
+  // Restrict CORS to frontend origin
+  app.use(cors({
+    origin: env.WEB_BASE_URL,
+    credentials: true,
+  }));
+
+  // Rate Limiting: 100 requests per minute
+  const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    limit: 100, // Limit each IP to 100 requests per `window` (here, per 1 minute).
+    standardHeaders: 'draft-8', 
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later." }
+  });
+  
+  // Apply rate limiter to all requests
+  app.use(limiter);
+
+  // Mount webhook routes BEFORE express.json() so they get raw buffer
+  app.use("/stripe/webhook", express.raw({ type: "application/json" }));
+  app.use("/razorpay/webhook", express.raw({ type: "application/json" }));
+  
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
@@ -71,7 +101,10 @@ export function createApp() {
   });
 
   app.use("/pipeline", pipelineRouter);
-  app.use("/auth", youtubeRouter);
+  app.use("/auth/youtube", youtubeRouter);
+  app.use("/auth", authRouter);
+  app.use("/stripe", stripeRouter);
+  app.use("/razorpay", razorpayRouter);
   app.use("/analytics", analyticsRouter);
   app.use("/cost", costRouter);
   app.use("/schedules", scheduleRouter);

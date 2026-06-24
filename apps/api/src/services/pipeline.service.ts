@@ -4,6 +4,7 @@ import { videoQueue } from "../queues/videoQueue";
 import { uploadQueue } from "../queues/uploadQueue";
 import { estimateRunCost } from "./cost.service";
 import { scoped } from "../lib/logger";
+import { calculateRunCost } from "@youtube-automation/pricing";
 
 const log = scoped("pipeline-svc");
 const USER_CANCELLED_MESSAGE = "cancelled by user";
@@ -241,6 +242,7 @@ function normalizeLanguageCodes(codes: string[]): string[] {
 }
 
 export async function createPipelineRun(
+  userId: string,
   niche: string,
   durationSec = 75,
   languageCode = "en",
@@ -250,14 +252,49 @@ export async function createPipelineRun(
     normalizeLanguageCodes([languageCode])[0] ?? "en";
   const normalizedFeatures = normalizeRunFeatures(features);
   validateRunFeatures(normalizedFeatures);
+
+  const costSnapshot = calculateRunCost({
+    durationSec,
+    languageCode: normalizedLanguageCode,
+    generateThumbnail: normalizedFeatures.enableThumbnail,
+    generateSubtitles: normalizedFeatures.enableSubtitles,
+  });
+
   const run = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || user.credits < costSnapshot.total) {
+      throw new PipelineServiceError("INSUFFICIENT_CREDITS", "Not enough credits");
+    }
+
+    const updatedUser = await tx.user.update({
+      where: { id: userId },
+      data: {
+        credits: { decrement: costSnapshot.total }
+      }
+    });
+
+    await tx.creditTransaction.create({
+      data: {
+        userId,
+        amount: -costSnapshot.total,
+        balanceAfter: updatedUser.credits,
+        type: "VIDEO_GENERATION",
+      }
+    });
+
     const created = await tx.pipelineRun.create({
       data: {
+        userId,
         niche,
         languageCode: normalizedLanguageCode,
         targetDurationSec: durationSec,
         stage: "QUEUED",
         status: "QUEUED",
+        creditsCharged: costSnapshot.total,
+        pricingSnapshot: costSnapshot as any,
       },
     });
 

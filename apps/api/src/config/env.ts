@@ -37,6 +37,16 @@ const schema = z
       .default("http://localhost:4000/auth/youtube/callback"),
     YOUTUBE_TOKEN_ENCRYPTION_KEY: z.string().optional(),
     WEB_BASE_URL: z.string().url().default("http://localhost:3000"),
+    JWT_SECRET: z.string().default("supersecretjwt_dev_only"),
+    SMTP_HOST: z.string().default("smtp.zoho.com"),
+    SMTP_PORT: z.coerce.number().default(465),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASS: z.string().optional(),
+    STRIPE_SECRET_KEY: z.string().optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    RAZORPAY_KEY_ID: z.string().optional(),
+    RAZORPAY_KEY_SECRET: z.string().optional(),
+    RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
   })
   .superRefine((value, ctx) => {
     const youtubeConfigured =

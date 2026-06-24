@@ -3,6 +3,7 @@ import { prisma } from "./db/prisma";
 import { env } from "./config/env";
 import { publishRunEvent } from "./events/publisher";
 import { scoped } from "./lib/logger";
+import { processRefundIfEligible } from "./refund";
 import {
   PIPELINE_STAGES,
   type RunControlOverrides,
@@ -94,6 +95,9 @@ async function markRunFailed(
     status: "FAILED",
     error: message,
   });
+
+  const failedStage = context.cache.run?.failedStage ?? context.cache.run?.stage ?? "QUEUED";
+  await processRefundIfEligible(context.prisma, context.runId, failedStage as StageName, message);
 }
 
 async function markRunCancelled(context: StageContext): Promise<void> {
@@ -125,6 +129,9 @@ async function markRunCancelled(context: StageContext): Promise<void> {
     error: USER_CANCELLED_MESSAGE,
     meta: { reason: "cancelled" },
   });
+
+  const failedStage = latest?.status === "FAILED" ? "FAILED" : "QUEUED"; // Approximate logic if missing cache
+  await processRefundIfEligible(context.prisma, context.runId, failedStage as StageName, USER_CANCELLED_MESSAGE);
 }
 
 async function markRunCompleted(context: StageContext): Promise<void> {

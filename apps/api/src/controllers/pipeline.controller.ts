@@ -25,7 +25,12 @@ function queryString(value: unknown): string | undefined {
 export async function postRun(req: Request, res: Response, next: NextFunction) {
   try {
     const input = createRunSchema.parse(req.body);
+    const userId = req.user?.id; // from requireAuth middleware
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     const run = await createPipelineRun(
+      userId,
       input.niche,
       input.durationSec,
       input.languageCode,

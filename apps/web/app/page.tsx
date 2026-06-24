@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, type RunFeatureToggles } from "../services/api";
+import { calculateRunCost } from "@youtube-automation/pricing";
 
 type Preset = { label: string; value: number };
 const PRESETS: Preset[] = [
@@ -94,6 +95,13 @@ export default function HomePage() {
 
   const pending = single.isPending;
   const err = single.error;
+
+  const costSnapshot = calculateRunCost({
+    durationSec,
+    languageCode,
+    generateThumbnail: features.enableThumbnail,
+    generateSubtitles: features.enableSubtitles,
+  });
 
   return (
     <div className="space-y-8 relative">
@@ -271,8 +279,58 @@ export default function HomePage() {
       </form>
 
       {err && (
-        <div className="text-red-400 text-sm">{(err as Error).message}</div>
+        <div className="text-red-400 text-sm">
+          {(err as Error).message.includes("Not enough credits") || (err as Error).message.includes("402") ? (
+            <div className="flex items-center gap-4 bg-red-500/10 p-4 rounded-xl border border-red-500/20">
+              <span>Insufficient credits. You need {costSnapshot.total} credits for this run.</span>
+              <button onClick={() => router.push("/pricing")} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                Buy Credits
+              </button>
+            </div>
+          ) : (
+            (err as Error).message
+          )}
+        </div>
       )}
+
+      {/* Itemized Breakdown */}
+      <div className="max-w-xl bg-white/[0.03] backdrop-blur-xl border border-white/10 p-6 sm:p-8 rounded-2xl shadow-2xl relative z-10 space-y-4">
+        <h3 className="text-xl font-semibold text-white drop-shadow-sm">Estimated Cost</h3>
+        <div className="space-y-2 text-sm text-white/80">
+          <div className="flex justify-between">
+            <span>Base Video (up to 60s)</span>
+            <span>{costSnapshot.breakdown.base} credits</span>
+          </div>
+          {costSnapshot.breakdown.duration > 0 && (
+            <div className="flex justify-between text-indigo-300">
+              <span>Extra Duration ({durationSec - 60}s)</span>
+              <span>+{costSnapshot.breakdown.duration} credits</span>
+            </div>
+          )}
+          {costSnapshot.breakdown.language > 0 && (
+            <div className="flex justify-between text-indigo-300">
+              <span>Non-English ({languageCode})</span>
+              <span>+{costSnapshot.breakdown.language} credits</span>
+            </div>
+          )}
+          {costSnapshot.breakdown.thumbnail > 0 && (
+            <div className="flex justify-between text-indigo-300">
+              <span>AI Thumbnail</span>
+              <span>+{costSnapshot.breakdown.thumbnail} credits</span>
+            </div>
+          )}
+          {costSnapshot.breakdown.subtitles > 0 && (
+            <div className="flex justify-between text-indigo-300">
+              <span>Burned-In Subtitles</span>
+              <span>+{costSnapshot.breakdown.subtitles} credits</span>
+            </div>
+          )}
+          <div className="border-t border-white/10 pt-2 mt-2 flex justify-between font-bold text-white text-base">
+            <span>Total Cost</span>
+            <span className="text-indigo-400">{costSnapshot.total} credits</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
