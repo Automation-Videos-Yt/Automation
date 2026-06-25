@@ -133,7 +133,7 @@ function useRunEvents(runId: string, onEvent: (kind: string) => void) {
   useEffect(() => {
     if (!runId) return;
     const url = `${
-      process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
+      process.env.NEXT_PUBLIC_API_URL || '/api'
     }/pipeline/${runId}/stream`;
     const es = new EventSource(url);
     es.onmessage = (m) => {

@@ -22,7 +22,7 @@ export default function PricingPage() {
     
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stripe/create-checkout-session`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/stripe/create-checkout-session`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -53,7 +53,7 @@ export default function PricingPage() {
     
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/razorpay/create-order`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/razorpay/create-order`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -73,7 +73,7 @@ export default function PricingPage() {
           order_id: data.order.id,
           handler: async function (response: any) {
             try {
-              const verifyRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/razorpay/verify-payment`, {
+              const verifyRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/razorpay/verify-payment`, {
                 method: "POST",
                 headers: { 
                   "Content-Type": "application/json",
