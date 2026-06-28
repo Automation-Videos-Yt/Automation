@@ -20,6 +20,10 @@ import { getPresignedS3Url } from "./lib/s3";
 export function createApp() {
   const app = express();
 
+  // Trust one proxy hop (Caddy). Required so express-rate-limit can read
+  // X-Forwarded-For correctly and identify real client IPs.
+  app.set("trust proxy", 1);
+
   app.use(
     pinoHttp({
       logger,
