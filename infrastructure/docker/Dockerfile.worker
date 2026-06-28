@@ -18,6 +18,10 @@ COPY apps/api/prisma apps/api/prisma
 COPY apps/worker apps/worker
 COPY packages/pricing packages/pricing
 
+# Build the pricing package first so its dist/ is available to the worker
+WORKDIR /app
+RUN npm run build --workspace=packages/pricing
+
 WORKDIR /app/apps/worker
 RUN npx prisma generate --schema=../api/prisma/schema.prisma
 RUN npm run build

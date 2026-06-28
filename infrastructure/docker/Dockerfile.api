@@ -18,6 +18,10 @@ RUN npm install
 COPY apps/api apps/api
 COPY packages/pricing packages/pricing
 
+# Build the pricing package first so its dist/ is available to the API
+WORKDIR /app
+RUN npm run build --workspace=packages/pricing
+
 WORKDIR /app/apps/api
 RUN npx prisma generate
 RUN npm run build
